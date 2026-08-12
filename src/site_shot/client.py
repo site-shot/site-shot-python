@@ -11,6 +11,7 @@ import base64
 import binascii
 import collections.abc
 import http.client
+import io
 import json as _json
 import os
 import random
@@ -121,7 +122,10 @@ CaptureResult = Dict[str, Any]
 #: Transport seam: ``transport(url, headers, timeout_seconds) -> response``.
 #: The response must expose ``status`` (or ``code``), ``read(size)`` and
 #: ``close()``. It must be returned for *any* HTTP status; only connection-level
-#: failures may raise.
+#: failures may raise. ``timeout_seconds`` is a *deadline for the whole
+#: exchange*, not a per-socket-operation timeout: the built-in transport starts
+#: counting when it is called and the budget covers connect, the status line and
+#: headers, and (together with the body reader below) the download.
 Transport = Callable[[str, Mapping[str, str], float], Any]
 
 
@@ -135,16 +139,112 @@ def _backoff_delay(attempt: int) -> float:
     return base * (0.5 + random.random() * 0.5)
 
 
+class _DeadlineReader(io.RawIOBase):
+    """Raw reader that re-arms the socket timeout from an *absolute* deadline.
+
+    A socket timeout is per operation, so it does not bound a response: a server
+    that dribbles one byte of the status line or headers just inside the socket
+    timeout keeps the client waiting ``bytes x timeout`` seconds, which is
+    unbounded in practice. Every read here is instead bounded by the time left
+    on the client deadline, which is what makes that deadline cover the header
+    phase and not just the body.
+    """
+
+    def __init__(self, source: Any, sock: Any, deadline: float) -> None:
+        super().__init__()
+        # ``source`` is the socket's own buffered reader. Holding on to it keeps
+        # the socket's io-refcount alive (urllib closes the socket as soon as
+        # the headers are in and relies on that refcount for the body) and gives
+        # us the one object that must be closed to release the fd.
+        self._source = source
+        self._raw = getattr(source, "raw", source)
+        self._sock = sock
+        self._deadline = deadline
+
+    def readable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return int(self._raw.fileno())
+
+    def readinto(self, buffer: Any) -> Optional[int]:
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise socket.timeout("client-side deadline exceeded")
+        try:
+            self._sock.settimeout(remaining)
+        except OSError:  # pragma: no cover - socket already torn down
+            pass
+        result = self._raw.readinto(buffer)
+        return None if result is None else int(result)
+
+    def close(self) -> None:
+        try:
+            self._source.close()
+        finally:
+            super().close()
+
+
+def _deadline_opener(deadline: float) -> urllib.request.OpenerDirector:
+    """An opener whose responses read under ``deadline`` from the first byte on.
+
+    The deadline is woven in at the lowest level (the socket reader) so it
+    covers the status line and the headers as well as the body — matching the
+    Node SDK, where a single ``AbortController`` timer covers the whole
+    exchange.
+    """
+
+    class _DeadlineHTTPResponse(http.client.HTTPResponse):
+        def __init__(
+            self,
+            sock: Any,
+            debuglevel: int = 0,
+            method: Optional[str] = None,
+            url: Optional[str] = None,
+        ) -> None:
+            super().__init__(sock, debuglevel, method=method, url=url)
+            # Swapped in before ``begin()`` reads the status line, so the very
+            # first read of the exchange is already deadline-bound.
+            self.fp = io.BufferedReader(_DeadlineReader(self.fp, sock, deadline))
+
+    # Bound to a differently spelled local: a class body cannot read an
+    # enclosing function's variable of the same name it is assigning.
+    deadline_response = _DeadlineHTTPResponse
+
+    class _DeadlineHTTPConnection(http.client.HTTPConnection):
+        response_class = deadline_response
+
+    class _DeadlineHTTPSConnection(http.client.HTTPSConnection):
+        response_class = deadline_response
+
+    class _DeadlineHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+            return self.do_open(_DeadlineHTTPConnection, req)
+
+    class _DeadlineHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req: urllib.request.Request) -> http.client.HTTPResponse:
+            # ``None`` makes http.client build the same verified default context
+            # urllib would have used.
+            context = getattr(self, "_context", None)
+            return self.do_open(_DeadlineHTTPSConnection, req, context=context)
+
+    return urllib.request.build_opener(_DeadlineHTTPHandler(), _DeadlineHTTPSHandler())
+
+
 def _urllib_transport(url: str, headers: Mapping[str, str], timeout: float) -> Any:
     """Default transport: a plain GET through :mod:`urllib.request`.
+
+    ``timeout`` is honoured as a deadline for the whole exchange, header phase
+    included — not as urllib's per-socket-operation timeout.
 
     ``HTTPError`` is returned rather than raised — it is a perfectly good
     response object, and the SDK classifies errors from the body, not from the
     exception type.
     """
     request = urllib.request.Request(url, headers=dict(headers), method="GET")
+    opener = _deadline_opener(time.monotonic() + timeout)
     try:
-        return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310 - fixed https endpoint
+        return opener.open(request, timeout=timeout)  # noqa: S310 - fixed https endpoint
     except urllib.error.HTTPError as exc:
         return exc
 
@@ -170,15 +270,36 @@ def _is_connection_error(exc: BaseException) -> bool:
     return isinstance(exc, (urllib.error.URLError, OSError, http.client.HTTPException))
 
 
+#: Where the underlying socket hides, per response flavour: a success-path
+#: ``HTTPResponse`` (``fp`` is the buffered reader) and an ``HTTPError``, whose
+#: ``fp`` *is* the ``HTTPResponse``. Missing the second one let error bodies
+#: overshoot the deadline by a whole socket timeout.
+_SOCKET_PATHS = (("fp", "raw", "_sock"), ("fp", "fp", "raw", "_sock"), ("fp", "_sock"))
+
+
+def _response_socket(response: Any) -> Any:
+    for path in _SOCKET_PATHS:
+        node: Any = response
+        for attribute in path:
+            node = getattr(node, attribute, None)
+            if node is None:
+                break
+        if node is not None:
+            return node
+    return None
+
+
 def _tighten_socket_timeout(response: Any, remaining: float) -> None:
     """Best-effort: shrink the socket timeout to the time left on the deadline.
 
     Without this a body that stalls late in the transfer could block for a full
-    socket timeout *on top of* the deadline. Purely an optimisation — the
-    per-chunk deadline check below is what actually enforces the bound.
+    socket timeout *on top of* the deadline. Belt and braces for the built-in
+    transport (whose reader is already deadline-bound), and the only such brake
+    a custom transport gets — the per-chunk deadline check below is what
+    actually enforces the bound.
     """
     try:
-        sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+        sock = _response_socket(response)
         if sock is not None:
             sock.settimeout(max(remaining, 0.001))
     except Exception:  # pragma: no cover - platform specific internals
@@ -205,7 +326,14 @@ def _append_param(params: List[Tuple[str, str]], key: str, value: Any) -> None:
     if isinstance(value, bool):
         params.append((key, "1" if value else "0"))
         return
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, (set, frozenset)):
+        # Sets have no order, and their iteration order changes between
+        # processes under hash randomization. Sort so a given call always
+        # serializes to the same query string (cache keys, tests, diffs).
+        for item in sorted(value, key=str):
+            _append_param(params, key, item)
+        return
+    if isinstance(value, (list, tuple)):
         for item in value:
             _append_param(params, key, item)
         return
@@ -283,7 +411,8 @@ class SiteShot:
         environment variable — the same variable the Site-Shot MCP server uses.
     :param base_url: API endpoint. Default ``https://api.site-shot.com/``.
     :param timeout: Client-side deadline **in seconds**, bounding the whole
-        exchange including the body download. Default: the per-call server
+        exchange: connecting, waiting for the status line and headers, and
+        downloading the body. Default: the per-call server
         ``timeout`` param (or its API default of 60000 ms) plus 30 s headroom,
         so the server always gets to answer first. Note the per-call ``timeout``
         capture option is a different thing: the server-side render deadline, in
@@ -331,8 +460,13 @@ class SiteShot:
 
     # -- return modes --------------------------------------------------------
 
-    def capture(self, url: str, **params: Any) -> bytes:
-        """Capture a screenshot and return the raw image bytes."""
+    def capture(self, url: str, /, **params: Any) -> bytes:
+        """Capture a screenshot and return the raw image bytes.
+
+        ``url`` is positional-only so that ``**options`` dicts carrying a ``url``
+        key (:class:`CaptureOptions` declares one) type-check and run: the
+        positional argument wins, exactly like ``userkey``.
+        """
         encoded = self.capture_base64(url, **params)
         compact = "".join(encoded.split())
         try:
@@ -346,14 +480,14 @@ class SiteShot:
             raise APIError("Site-Shot returned an empty image payload.")
         return data
 
-    def capture_to_file(self, url: str, path: str, **params: Any) -> str:
+    def capture_to_file(self, url: str, path: str, /, **params: Any) -> str:
         """Capture a screenshot and write it to ``path``. Returns ``path``."""
         data = self.capture(url, **params)
         with open(path, "wb") as handle:
             handle.write(data)
         return path
 
-    def capture_base64(self, url: str, **params: Any) -> str:
+    def capture_base64(self, url: str, /, **params: Any) -> str:
         """Capture and return plain base64 (any data-URL prefix stripped).
 
         Handy for data URLs and LLM vision payloads.
@@ -364,7 +498,7 @@ class SiteShot:
             raise APIError("Site-Shot response did not contain an image.", body=result)
         return _strip_data_url_prefix(image)
 
-    def capture_json(self, url: str, **params: Any) -> CaptureResult:
+    def capture_json(self, url: str, /, **params: Any) -> CaptureResult:
         """Capture and return the full JSON result.
 
         Contains the base64 ``image`` plus any metadata the API includes —
@@ -376,7 +510,7 @@ class SiteShot:
         timeout_s = self._resolve_timeout(params)
         return self._request(endpoint, timeout_s)
 
-    def build_url(self, url: str, **params: Any) -> str:
+    def build_url(self, url: str, /, **params: Any) -> str:
         """Build the request URL without executing it.
 
         The URL is in the API's default image-response mode.
@@ -444,6 +578,15 @@ class SiteShot:
                     ) from exc
                 if not _is_connection_error(exc):
                     raise
+                if time.monotonic() >= deadline:
+                    # The connection died at or after the deadline: that is the
+                    # deadline doing its job (a transport may report it as a
+                    # torn-down connection rather than a timeout), so report a
+                    # timeout and never retry it.
+                    raise SiteShotTimeoutError(
+                        "Site-Shot request timed out after {0:g} s "
+                        "(client-side deadline).".format(timeout_s)
+                    ) from exc
                 if attempt < self.retries:
                     attempt += 1
                     _sleep(_backoff_delay(attempt))

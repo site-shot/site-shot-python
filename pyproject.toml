@@ -64,7 +64,19 @@ include = [
 
 [tool.mypy]
 strict = true
-files = ["src/site_shot"]
+# Always check the checked-out source, never a stale installed copy.
+mypy_path = "src"
+# The tests are checked too: consumer-shaped usage is exactly where the exported
+# TypedDict broke, and checking only src/ is why that shipped. Bodies are
+# checked everywhere; only the legacy test module is excused from annotating
+# every def.
+files = ["src/site_shot", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["test_client", "tests.test_client"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
 
 [tool.ruff]
 line-length = 100

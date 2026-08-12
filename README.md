@@ -61,8 +61,8 @@ meta = client.capture_json("https://example.com/", source_code=True)
 print(meta["source_code"][:200])
 ```
 
-`url` is positional, every capture option is a keyword argument. An options dict
-works too: `client.capture(url, **options)`.
+`url` is positional-only, every capture option is a keyword argument. An options
+dict works too: `client.capture(url, **options)`.
 
 ### `build_url()` — build the request URL without executing it
 
@@ -78,9 +78,9 @@ url = client.build_url("https://example.com/", width=1280)
 ## Screenshots from another country
 
 Pass `country` as an **ISO 3166-1 alpha-2 code** (e.g. `"DE"`, `"BR"`, `"JP"` —
-49 countries available, see <https://www.site-shot.com/countries/>). It
-automatically sets a matching IP, language, time zone, and geolocation. Full
-country names are not valid values.
+the current list is at <https://www.site-shot.com/countries/>). It automatically
+sets a matching IP, language, time zone, and geolocation. Full country names are
+not valid values.
 
 By default, if the requested country has no capacity at that moment, the API
 silently falls back to a US vantage point. Set `strict_country` to fail fast
@@ -128,7 +128,7 @@ SDK update.
 
 | Option | Type / range | API default | Notes |
 |---|---|---|---|
-| `url` | str, **required** (positional) | — | bare domains like `example.com` accepted (`https://` assumed) |
+| `url` | str, **required** (positional-only) | — | bare domains like `example.com` accepted (`https://` assumed) |
 | `width` | int 100–8000 | 1024 | viewport width |
 | `height` | int 100–20000 | 768 | viewport height |
 | `zoom` | int 5–1000 | 100 | percentage zoom |
@@ -164,6 +164,11 @@ options: CaptureOptions = {"width": 1280, "full_size": True, "country": "DE"}
 png = client.capture("https://example.com/", **options)
 ```
 
+`url` is positional-only on every capture method, so an options dict that also
+carries a `url` key still type-checks and runs — the positional URL wins, just
+like `userkey`. (These snippets are type-checked under `mypy --strict` in the
+test suite.)
+
 The SDK sends GET requests; very long `javascript_code` or `user_agent` values
 can exceed practical URL length limits (~8 KB).
 
@@ -191,7 +196,9 @@ client = SiteShot(os.environ["SITESHOT_API_KEY"])    # or pass it explicitly
 Two different things are called "timeout", exactly as in the HTTP API:
 
 - the constructor's `timeout` is the **client-side deadline in seconds**, and it
-  bounds the *whole* exchange — including downloading the image body;
+  bounds the *whole* exchange — connecting, waiting for the status line and
+  headers, and downloading the image body (a slow drip in any of those phases
+  cannot outlast it);
 - the capture option `timeout` is the **server-side render deadline in
   milliseconds** (the verbatim HTTP param name).
 

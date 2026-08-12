@@ -1,23 +1,32 @@
-"""Offline tests for the Site-Shot Python SDK — the HTTP layer is fully stubbed.
+"""Offline tests for the Site-Shot Python SDK. No test reaches the internet.
 
 Mirrors the coverage of the Node SDK's test suite: auth placement, param
 serialization and passthrough, every return mode, base64 decoding, the whole
-error taxonomy (including ``country_unavailable``), retry policy, and the
-client-side deadline covering the body download.
+error taxonomy (including ``country_unavailable``), and retry policy — all of it
+through a stubbed transport.
+
+The client-side deadline is the exception: it is tested against a real socket
+server on loopback (``UrllibTransportTests``), because the failure it guards
+against — every byte arriving inside the socket timeout, forever — only exists
+below the transport seam and cannot be stubbed.
 """
 
 import base64
+import http.client
 import io
 import json
 import os
 import socket
 import sys
 import tempfile
+import threading
 import time
+import types
 import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from unittest import mock
 
 try:  # Run straight from a checkout (src layout) without installing first.
@@ -37,6 +46,7 @@ from site_shot import (
     SiteShotTimeoutError,
     __version__,
 )
+from site_shot.client import _deadline_opener, _tighten_socket_timeout
 
 PIXELS = b"not-really-a-png-but-bytes-are-bytes"
 PIXELS_B64 = base64.b64encode(PIXELS).decode("ascii")
@@ -47,40 +57,45 @@ PIXELS_B64 = base64.b64encode(PIXELS).decode("ascii")
 # ---------------------------------------------------------------------------
 
 
+# The stub HTTP layer is annotated even though the test methods below are not:
+# that is what gives the client and transport real types inside every test body,
+# so mypy sees consumer-shaped calls instead of `Any`.
+
+
 class FakeResponse:
     """Minimal stand-in for an ``http.client.HTTPResponse``."""
 
-    def __init__(self, body, status=200):
+    def __init__(self, body: Union[str, bytes], status: int = 200) -> None:
         if isinstance(body, str):
             body = body.encode("utf-8")
         self._buffer = io.BytesIO(body)
         self.status = status
         self.closed = False
 
-    def read(self, size=-1):
+    def read(self, size: int = -1) -> bytes:
         return self._buffer.read(size)
 
-    def close(self):
+    def close(self) -> None:
         self.closed = True
 
 
-def json_response(payload, status=200):
+def json_response(payload: Any, status: int = 200) -> FakeResponse:
     return FakeResponse(json.dumps(payload), status)
 
 
 class Call:
-    def __init__(self, url, headers, timeout):
+    def __init__(self, url: str, headers: Mapping[str, str], timeout: float) -> None:
         self.url = url
         self.headers = headers
         self.timeout = timeout
 
     @property
-    def params(self):
+    def params(self) -> Dict[str, List[str]]:
         return urllib.parse.parse_qs(
             urllib.parse.urlsplit(self.url).query, keep_blank_values=True
         )
 
-    def param(self, name):
+    def param(self, name: str) -> Optional[str]:
         values = self.params.get(name)
         return values[0] if values else None
 
@@ -92,11 +107,11 @@ class StubTransport:
     callable ``(url, headers, timeout) -> response``.
     """
 
-    def __init__(self, *replies):
-        self.calls = []
-        self._replies = list(replies) or [json_response({"image": PIXELS_B64})]
+    def __init__(self, *replies: Any) -> None:
+        self.calls: List[Call] = []
+        self._replies: List[Any] = list(replies) or [json_response({"image": PIXELS_B64})]
 
-    def __call__(self, url, headers, timeout):
+    def __call__(self, url: str, headers: Mapping[str, str], timeout: float) -> Any:
         self.calls.append(Call(url, headers, timeout))
         reply = self._replies.pop(0) if len(self._replies) > 1 else self._replies[0]
         if isinstance(reply, BaseException):
@@ -106,11 +121,11 @@ class StubTransport:
         return reply
 
     @property
-    def last(self):
+    def last(self) -> Call:
         return self.calls[-1]
 
 
-def make_client(*replies, **kwargs):
+def make_client(*replies: Any, **kwargs: Any) -> Tuple[SiteShot, StubTransport]:
     transport = StubTransport(*replies)
     kwargs.setdefault("api_key", "test-key")
     client = SiteShot(transport=transport, **kwargs)
@@ -254,6 +269,31 @@ class ParamSerializationTests(SiteShotTestCase):
         self.assertEqual(transport.last.param("width"), "1280")
         self.assertEqual(transport.last.param("no_ads"), "1")
 
+    def test_an_options_dict_carrying_url_splats_onto_every_method(self):
+        # `CaptureOptions` declares `url`, so the exported TypedDict must splat
+        # onto a call that also passes the URL positionally — the URL parameter
+        # is positional-only for exactly this reason. See the typing example in
+        # tests/test_typing_examples.py, which mypy --strict checks.
+        options: CaptureOptions = {"url": "https://ignored.example/", "width": 800}
+        # A fresh response per call: one FakeResponse body can only be read once.
+        client, transport = make_client(lambda *_: json_response({"image": PIXELS_B64}))
+        client.capture("https://example.com/", **options)
+        self.assertEqual(transport.last.params["url"], ["https://example.com/"])
+        self.assertEqual(transport.last.param("width"), "800")
+
+        client.capture_base64("https://example.com/", **options)
+        self.assertEqual(transport.last.params["url"], ["https://example.com/"])
+        client.capture_json("https://example.com/", **options)
+        self.assertEqual(transport.last.params["url"], ["https://example.com/"])
+        url = client.build_url("https://example.com/", **options)
+        self.assertIn("url=https%3A%2F%2Fexample.com%2F", url)
+        self.assertNotIn("ignored.example", url)
+        with tempfile.TemporaryDirectory() as directory:
+            client.capture_to_file(
+                "https://example.com/", os.path.join(directory, "shot.png"), **options
+            )
+        self.assertEqual(transport.last.params["url"], ["https://example.com/"])
+
     def test_capture_methods_always_request_response_type_json(self):
         client, transport = make_client()
         client.capture("https://example.com/", response_type="image")
@@ -299,6 +339,19 @@ class ParamSerializationTests(SiteShotTestCase):
         client, transport = make_client()
         client.capture("https://example.com/", request_header=["A:1", "B:2"])
         self.assertEqual(transport.last.params["request_header"], ["A:1", "B:2"])
+
+    def test_tuple_values_keep_their_order(self):
+        client, transport = make_client()
+        client.capture("https://example.com/", request_header=("B:2", "A:1"))
+        self.assertEqual(transport.last.params["request_header"], ["B:2", "A:1"])
+
+    def test_set_values_are_sorted_so_the_query_string_is_deterministic(self):
+        # Set iteration order varies between processes under string hash
+        # randomization; an unsorted emit made the same call serialize
+        # differently run to run.
+        client, transport = make_client()
+        client.capture("https://example.com/", request_header={"C:3", "A:1", "B:2"})
+        self.assertEqual(transport.last.params["request_header"], ["A:1", "B:2", "C:3"])
 
     def test_query_strings_and_specials_survive_a_round_trip(self):
         client, transport = make_client()
@@ -720,54 +773,315 @@ class RetryTests(SiteShotTestCase):
 
 
 # ---------------------------------------------------------------------------
-# Default (urllib) transport
+# Default (urllib) transport — driven against a real socket server
 # ---------------------------------------------------------------------------
 
 
+DRIP_INTERVAL = 0.05
+#: Long enough that a client which only bounds *individual socket reads* keeps
+#: waiting well past every assertion below, short enough not to stall the suite.
+DRIP_ROUNDS = 200
+
+
+def send_all(connection, payload):
+    try:
+        connection.sendall(payload)
+        return True
+    except OSError:  # the client hung up — expected once its deadline fires
+        return False
+
+
+def reply_json(payload, status=200, reason="OK"):
+    """Script: one complete, immediate HTTP response."""
+
+    def script(connection, stop):
+        body = json.dumps(payload).encode("utf-8")
+        head = (
+            "HTTP/1.1 {0} {1}\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: {2}\r\n"
+            "Connection: close\r\n\r\n"
+        ).format(status, reason, len(body)).encode("ascii")
+        send_all(connection, head + body)
+
+    return script
+
+
+def drip_headers(connection, stop):
+    """Script: a response whose *headers* arrive one byte at a time.
+
+    Every byte lands inside any sane per-socket-operation timeout, so a client
+    that mistakes urllib's ``timeout`` for a deadline waits
+    ``header_bytes x timeout`` seconds — which is not a bound at all.
+    """
+    send_all(connection, b"HTTP/1.1 200 OK\r\n")
+    for index in range(DRIP_ROUNDS):
+        if stop.wait(DRIP_INTERVAL):
+            return
+        if not send_all(connection, "X-Pad-{0}: x\r\n".format(index).encode("ascii")):
+            return
+
+
+def drip_body(status=200, reason="OK"):
+    """Script: headers land at once, then the body trickles forever."""
+
+    def script(connection, stop):
+        head = (
+            "HTTP/1.1 {0} {1}\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: 4096\r\n"
+            "Connection: close\r\n\r\n"
+        ).format(status, reason).encode("ascii")
+        if not send_all(connection, head):
+            return
+        for _ in range(DRIP_ROUNDS):
+            if stop.wait(DRIP_INTERVAL):
+                return
+            if not send_all(connection, b"x"):
+                return
+
+    return script
+
+
+class LocalHTTPServer:
+    """A real HTTP server on localhost, scripted at the byte level.
+
+    Sockets are the only honest way to test a deadline: a stubbed transport
+    cannot reproduce "each byte arrives inside the socket timeout, forever",
+    which is exactly the shape that used to pin the client open.
+    """
+
+    def __init__(self, script):
+        self._script = script
+        self.requests = []
+        self.stop = threading.Event()
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._socket.bind(("127.0.0.1", 0))
+        self._socket.listen(5)
+        self._socket.settimeout(0.1)
+        self.port = self._socket.getsockname()[1]
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+
+    @property
+    def base_url(self):
+        return "http://127.0.0.1:{0}/".format(self.port)
+
+    def _accept_loop(self):
+        while not self.stop.is_set():
+            try:
+                connection, _ = self._socket.accept()
+            except socket.timeout:
+                continue
+            except OSError:  # pragma: no cover - socket closed under us
+                return
+            worker = threading.Thread(target=self._handle, args=(connection,), daemon=True)
+            worker.start()
+
+    def _handle(self, connection):
+        try:
+            connection.settimeout(5.0)
+            request = b""
+            while b"\r\n\r\n" not in request:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    break
+                request += chunk
+            self.requests.append(request.decode("latin-1"))
+            self._script(connection, self.stop)
+        except OSError:  # pragma: no cover - client hung up first
+            pass
+        finally:
+            try:
+                connection.close()
+            except OSError:  # pragma: no cover
+                pass
+
+    def close(self):
+        self.stop.set()
+        try:
+            self._socket.close()
+        except OSError:  # pragma: no cover
+            pass
+        self._thread.join(timeout=2.0)
+
+
 class UrllibTransportTests(SiteShotTestCase):
-    def test_default_transport_issues_a_urllib_get(self):
-        captured = {}
-
-        def fake_urlopen(request, timeout=None):
-            captured["url"] = request.full_url
-            captured["method"] = request.get_method()
-            captured["headers"] = request.headers
-            captured["timeout"] = timeout
-            return json_response({"image": PIXELS_B64})
-
-        with mock.patch("urllib.request.urlopen", fake_urlopen):
-            client = SiteShot("test-key")
-            self.assertEqual(client.capture("https://example.com/"), PIXELS)
-
-        self.assertEqual(captured["method"], "GET")
-        self.assertTrue(captured["url"].startswith("https://api.site-shot.com/?"))
-        self.assertAlmostEqual(captured["timeout"], 90.0)
-        lowered = {k.lower(): v for k, v in captured["headers"].items()}
-        self.assertEqual(lowered["accept"], "application/json")
-
-    def test_http_error_is_treated_as_a_response_not_a_connection_failure(self):
-        body = json.dumps({"error": "invalid userkey"}).encode("utf-8")
-        error = urllib.error.HTTPError(
-            "https://api.site-shot.com/", 403, "Forbidden", {}, io.BytesIO(body)
+    def setUp(self):
+        super().setUp()
+        # Never route the loopback tests through a developer's or CI's proxy.
+        proxy_patcher = mock.patch.dict(
+            os.environ, {"no_proxy": "*", "NO_PROXY": "*"}, clear=False
         )
+        proxy_patcher.start()
+        self.addCleanup(proxy_patcher.stop)
+        for name in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+            os.environ.pop(name, None)
 
-        def fake_urlopen(request, timeout=None):
-            raise error
+    def serve(self, script):
+        server = LocalHTTPServer(script)
+        self.addCleanup(server.close)
+        return server
 
-        with mock.patch("urllib.request.urlopen", fake_urlopen):
-            client = SiteShot("test-key")
-            with self.assertRaises(AuthError) as ctx:
-                client.capture("https://example.com/")
+    def test_default_transport_issues_a_get_with_the_sdk_headers(self):
+        server = self.serve(reply_json({"image": PIXELS_B64}))
+        client = SiteShot("test-key", base_url=server.base_url)
+        self.assertEqual(client.capture("https://example.com/", width=1280), PIXELS)
+        request = server.requests[0]
+        request_line = request.splitlines()[0]
+        self.assertTrue(request_line.startswith("GET /?"))
+        self.assertIn("userkey=test-key", request_line)
+        self.assertIn("width=1280", request_line)
+        lowered = request.lower()
+        self.assertIn("accept: application/json", lowered)
+        self.assertIn("user-agent: site-shot/0.1.0 python", lowered)
+
+    def test_http_error_status_is_treated_as_a_response_not_a_connection_failure(self):
+        server = self.serve(reply_json({"error": "invalid userkey"}, 403, "Forbidden"))
+        client = SiteShot("test-key", base_url=server.base_url)
+        with self.assertRaises(AuthError) as ctx:
+            client.capture("https://example.com/")
         self.assertEqual(ctx.exception.http_status, 403)
 
-    def test_url_error_surfaces_as_api_error(self):
-        def fake_urlopen(request, timeout=None):
-            raise urllib.error.URLError("nodename nor servname provided")
+    def test_a_refused_connection_surfaces_as_api_error(self):
+        closed = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        client = SiteShot("test-key", base_url="http://127.0.0.1:{0}/".format(port))
+        with self.assertRaises(APIError) as ctx:
+            client.capture("https://example.com/")
+        self.assertNotIsInstance(ctx.exception, SiteShotTimeoutError)
 
-        with mock.patch("urllib.request.urlopen", fake_urlopen):
-            client = SiteShot("test-key")
-            with self.assertRaises(APIError):
-                client.capture("https://example.com/")
+    def test_client_deadline_bounds_the_header_phase(self):
+        # Regression guard for the deadline that only covered the body: urllib's
+        # `timeout` is per socket operation, so a server dripping headers held
+        # the client for header_bytes x timeout seconds (measured: 27 s for a
+        # 68-byte drip against a 2 s "deadline", growing with the header size).
+        server = self.serve(drip_headers)
+        client = SiteShot("test-key", base_url=server.base_url, timeout=1.0, retries=3)
+        started = time.monotonic()
+        with self.assertRaises(SiteShotTimeoutError):
+            client.capture("https://example.com/")
+        elapsed = time.monotonic() - started
+        self.assertLess(elapsed, 4.0)
+        self.assertEqual(len(server.requests), 1)  # a spent render is never retried
+
+    def test_client_deadline_bounds_a_dripping_body(self):
+        server = self.serve(drip_body())
+        client = SiteShot("test-key", base_url=server.base_url, timeout=1.0)
+        started = time.monotonic()
+        with self.assertRaises(SiteShotTimeoutError):
+            client.capture("https://example.com/")
+        self.assertLess(time.monotonic() - started, 4.0)
+
+    def test_client_deadline_bounds_a_dripping_body_on_an_error_status(self):
+        # The error path returns an HTTPError, whose internals are shaped
+        # differently from a success-path HTTPResponse — it used to escape the
+        # socket-timeout tightening and overshoot the deadline.
+        server = self.serve(drip_body(500, "Internal Server Error"))
+        client = SiteShot("test-key", base_url=server.base_url, timeout=1.0)
+        started = time.monotonic()
+        with self.assertRaises(SiteShotTimeoutError):
+            client.capture("https://example.com/")
+        self.assertLess(time.monotonic() - started, 4.0)
+
+
+class FakeSocket:
+    """Just enough socket for ``HTTPResponse``: a canned byte stream."""
+
+    def __init__(self, data):
+        self._data = data
+        self.timeouts = []
+
+    def makefile(self, mode="rb", *args, **kwargs):
+        return io.BufferedReader(io.BytesIO(self._data))
+
+    def settimeout(self, value):
+        self.timeouts.append(value)
+
+
+class DeadlineOpenerTests(SiteShotTestCase):
+    """The deadline must reach https:// — the scheme every real capture uses.
+
+    The socket-level tests above run over http:// on loopback, so these pin the
+    wiring itself: both schemes get the same deadline-bound response class.
+    """
+
+    RESPONSE = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+
+    def connection_classes(self, deadline):
+        opener = _deadline_opener(deadline)
+        captured = {}
+
+        def fake_do_open(handler, connection_class, req, **kwargs):
+            captured[req.type] = connection_class
+            return None
+
+        with mock.patch.object(urllib.request.AbstractHTTPHandler, "do_open", fake_do_open):
+            for handler in getattr(opener, "handlers"):  # not in typeshed, real since 2.x
+                if isinstance(handler, urllib.request.HTTPSHandler):
+                    handler.https_open(urllib.request.Request("https://api.site-shot.com/"))
+                elif isinstance(handler, urllib.request.HTTPHandler):
+                    handler.http_open(urllib.request.Request("http://api.site-shot.com/"))
+        return captured
+
+    def test_both_schemes_get_a_deadline_bound_connection(self):
+        captured = self.connection_classes(time.monotonic() + 30.0)
+        self.assertEqual(set(captured), {"http", "https"})
+        self.assertTrue(issubclass(captured["http"], http.client.HTTPConnection))
+        self.assertTrue(issubclass(captured["https"], http.client.HTTPSConnection))
+        self.assertIs(captured["http"].response_class, captured["https"].response_class)
+        self.assertIsNot(captured["https"].response_class, http.client.HTTPResponse)
+
+    def test_a_live_deadline_re_arms_the_socket_on_every_read(self):
+        response_class = self.connection_classes(time.monotonic() + 30.0)["https"].response_class
+        sock = FakeSocket(self.RESPONSE)
+        response = response_class(sock)
+        response.begin()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(), b"ok")
+        # Headers, not just the body: the status line alone re-armed the socket.
+        self.assertTrue(sock.timeouts)
+        self.assertTrue(all(0 < value <= 30.0 for value in sock.timeouts))
+
+    def test_an_expired_deadline_stops_the_header_read(self):
+        response_class = self.connection_classes(time.monotonic() - 1.0)["https"].response_class
+        response = response_class(FakeSocket(self.RESPONSE))
+        with self.assertRaises(socket.timeout):
+            response.begin()
+
+
+class SocketTighteningTests(SiteShotTestCase):
+    """The deadline brake must find the socket on both response shapes."""
+
+    class Sock:
+        def __init__(self):
+            self.timeout = None
+
+        def settimeout(self, value):
+            self.timeout = value
+
+    def http_response(self, sock):
+        """The success-path shape: ``response.fp`` is the buffered reader."""
+        raw = types.SimpleNamespace(_sock=sock)
+        return types.SimpleNamespace(fp=types.SimpleNamespace(raw=raw))
+
+    def test_success_path_response_socket_is_tightened(self):
+        sock = self.Sock()
+        _tighten_socket_timeout(self.http_response(sock), 1.5)
+        self.assertEqual(sock.timeout, 1.5)
+
+    def test_error_path_response_socket_is_tightened(self):
+        # urllib.error.HTTPError.fp *is* the HTTPResponse, so the socket sits
+        # one level deeper than on the success path.
+        sock = self.Sock()
+        _tighten_socket_timeout(types.SimpleNamespace(fp=self.http_response(sock)), 1.5)
+        self.assertEqual(sock.timeout, 1.5)
+
+    def test_unknown_response_shape_is_left_alone(self):
+        _tighten_socket_timeout(object(), 1.5)  # must not raise
 
 
 if __name__ == "__main__":
