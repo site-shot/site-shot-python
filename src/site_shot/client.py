@@ -99,8 +99,11 @@ class CaptureOptions(TypedDict, total=False):
     http_proxy: str
     proxy_username: str
     proxy_password: str
-    #: Rotate the outbound proxy per attempt. Off by default, and switched on
-    #: automatically when ``country`` is set - pass ``False`` to opt out.
+    #: Route selection. There is no default, and omitting this is not the same as
+    #: passing either value: leave it out and Site-Shot picks the route (recommended).
+    #: ``True`` sends every attempt through a rotating proxy. ``False`` makes a single
+    #: attempt without rotation - through one proxy of ``country`` when a country is
+    #: set, otherwise direct.
     proxy_rotation: bool
     #: Include the rendered HTML in the JSON result (use with ``capture_json``).
     source_code: bool

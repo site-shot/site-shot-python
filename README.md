@@ -141,7 +141,7 @@ SDK update.
 | `user_agent` | str | — | custom UA for the rendering browser |
 | `request_headers` | dict | — | emitted as repeated `request_header=Name:value` params |
 | `http_proxy` / `proxy_username` / `proxy_password` | str | — | bring-your-own-proxy passthrough |
-| `proxy_rotation` | bool | False | auto-enabled when `country` is set; pass `False` to opt out |
+| `proxy_rotation` | bool | — | omit and Site-Shot picks the route; `True` rotates a proxy on every attempt; `False` makes one attempt without rotation (via `country` if set, else direct) |
 | `source_code` | bool | False | include rendered HTML (use with `capture_json`) |
 | `javascript_code` | str | — | inject JS into the page before capture |
 | `no_ads` | bool | False | remove ads |
