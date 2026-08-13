@@ -132,6 +132,8 @@ class ReadmeExamplesTypeCheck(unittest.TestCase):
             self.assertEqual(client.capture("https://example.com/"), PIXELS)
 
     def test_error_types_are_catchable_as_documented(self) -> None:
+        # Trimmed to the one key the SDK reads; the full application envelope is
+        # pinned in tests/test_client.py::app_error_envelope.
         transport = StubTransport({"error": "country_unavailable"})
         client = SiteShot("test-key", transport=transport)
         caught: SiteShotError

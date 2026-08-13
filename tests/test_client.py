@@ -469,67 +469,183 @@ class BuildUrlTests(SiteShotTestCase):
 
 # ---------------------------------------------------------------------------
 # Error taxonomy
+#
+# The fixtures below are the API's REAL error envelopes, not invented shapes.
+# The API uses two different error keys depending on how the request failed:
+#
+#   A. A request rejected before capture starts answers a non-2xx status with
+#      {"message": "..."} - never an `error` key.
+#   B. A failure during capture answers HTTP *200* and the capture envelope,
+#      which carries `error` plus a placeholder error `image`. It never sets a
+#      top-level `message`.
+#
+# Provenance of each fixture is noted inline. "live" = captured against
+# https://api.site-shot.com on 2026-08-13; "derived" = reconstructed from the
+# API implementation.
 # ---------------------------------------------------------------------------
+
+
+def app_error_envelope(message: str, internal_status: int) -> Dict[str, Any]:
+    """Real during-capture failure envelope (shape B).
+
+    HTTP 200, an ``error`` key, and a placeholder error image posing as a
+    screenshot. ``response.status_code`` carries the internal failure status -
+    it is NOT the HTTP status of the API response, which is 200 on this path.
+    Derived from the API implementation.
+    """
+    return {
+        "screenshot_parameters": {
+            "format": "png",
+            "request_headers": [],
+            "response_type": "json",
+            "url": "https://example.com/",
+            "width": 1024,
+            "height": 768,
+            "zoom": 100,
+            "full_size": "0",
+            "no_ads": 0,
+            "no_cookie_popup": 0,
+            "source_code": 0,
+            "proxy_rotation": "1",
+        },
+        "response": {"status_code": internal_status, "headers": []},
+        "image": "data:image/png;base64,{0}".format(PIXELS_B64),
+        "error": message,
+    }
 
 
 class ErrorTaxonomyTests(SiteShotTestCase):
     def test_country_unavailable_envelope_on_http_200(self):
-        client, _ = make_client(json_response({"error": "country_unavailable"}))
+        # derived: a strict_country capture with no capacity fails with
+        # 'country_unavailable' and an internal 503, carried in the `error`
+        # key. The documented public contract is likewise
+        # `"error": "country_unavailable"`.
+        body = app_error_envelope("country_unavailable", 503)
+        client, _ = make_client(json_response(body))
         with self.assertRaises(CountryUnavailableError) as ctx:
             client.capture("https://whatismycountry.com/", country="DE", strict_country=True)
         error = ctx.exception
         self.assertIsInstance(error, SiteShotError)
+        # The transport status really is 200 - the 503 lives inside the body.
         self.assertEqual(error.http_status, 200)
-        self.assertEqual(error.body, {"error": "country_unavailable"})
+        self.assertEqual(error.body, body)
 
-    def test_country_unavailable_envelope_on_a_404(self):
-        client, _ = make_client(json_response({"error": "country_unavailable"}, 404))
-        with self.assertRaises(CountryUnavailableError):
-            client.capture("https://whatismycountry.com/", country="BR", strict_country=True)
+    def test_capture_failure_envelope_never_leaks_its_placeholder_image(self):
+        # The regression this guards: the envelope carries a valid base64
+        # `image`, so failing to read `error` would return the "screenshot
+        # creation error" placeholder as a successful capture.
+        client, _ = make_client(json_response(app_error_envelope("Screenshot capture failed", 500)))
+        with self.assertRaises(SiteShotError):
+            client.capture("https://example.com/")
 
     def test_country_unavailable_from_capture_json_too(self):
-        client, _ = make_client(json_response({"error": "country_unavailable"}))
+        client, _ = make_client(json_response(app_error_envelope("country_unavailable", 503)))
         with self.assertRaises(CountryUnavailableError):
             client.capture_json("https://example.com/", country="JP", strict_country=True)
 
-    def test_http_401_and_403_raise_auth_error(self):
-        for status in (401, 403):
-            client, _ = make_client(json_response({"error": "invalid userkey"}, status))
-            with self.assertRaises(AuthError):
+    def test_real_401_envelopes_raise_auth_error_with_the_message(self):
+        cases = [
+            # live: curl "https://api.site-shot.com/?url=...&userkey=<invalid>"
+            {"message": "Invalid authentication credentials"},
+            # live: same URL with the userkey param omitted or empty
+            {"message": "No API key found in request"},
+        ]
+        for body in cases:
+            client, _ = make_client(json_response(body, 401))
+            with self.assertRaises(AuthError) as ctx:
                 client.capture("https://example.com/")
+            error = ctx.exception
+            self.assertEqual(error.http_status, 401)
+            self.assertEqual(error.body, body)
+            # The whole point of the fix: the API's message must survive into
+            # the error text instead of being silently dropped.
+            self.assertIn(body["message"], str(error))
 
-    def test_auth_flavoured_in_band_error_on_http_200(self):
-        client, _ = make_client(json_response({"error": "Invalid userkey"}))
-        with self.assertRaises(AuthError):
+    def test_real_403_envelope_raises_quota_error_not_auth_error(self):
+        # derived: an account whose subscription is inactive is rejected with
+        # 403 and {"message": "No active subscription found"}. Not reproducible
+        # live without such an account.
+        #
+        # 403 is a billing state, not a key problem - the key is valid, the
+        # subscription lapsed - so it must NOT tell the user to check their key.
+        body = {"message": "No active subscription found"}
+        client, _ = make_client(json_response(body, 403))
+        with self.assertRaises(QuotaError) as ctx:
+            client.capture("https://example.com/")
+        error = ctx.exception
+        self.assertNotIsInstance(error, AuthError)
+        self.assertEqual(error.http_status, 403)
+        self.assertEqual(error.body, body)
+        self.assertIn("No active subscription found", str(error))
+
+    def test_message_on_a_successful_2xx_capture_is_metadata_not_an_error(self):
+        # `message` only signals failure on a non-2xx rejection, so it must
+        # never turn a successful capture into a raise.
+        client, _ = make_client(
+            json_response({"image": PIXELS_B64, "message": "rendered from DE"})
+        )
+        self.assertEqual(client.capture("https://example.com/"), PIXELS)
+
+    def test_error_key_wins_over_a_sibling_message_key(self):
+        client, _ = make_client(
+            json_response({"error": "country_unavailable", "message": "informational"})
+        )
+        with self.assertRaises(CountryUnavailableError):
             client.capture("https://example.com/")
 
+    def test_rejections_classify_by_status_without_body_text(self):
+        # Defensive: a 401/403 whose body the SDK cannot mine for a message must
+        # still classify by status rather than fall through to APIError - 401 as
+        # a key problem, 403 as a subscription problem.
+        for status, expected in ((401, AuthError), (403, QuotaError)):
+            client, _ = make_client(json_response({}, status))
+            with self.assertRaises(expected):
+                client.capture("https://example.com/")
+
     def test_http_402_and_429_raise_quota_error(self):
+        # NOTE: no evidence api.site-shot.com currently emits either status -
+        # no request rate limiting is applied, and the capture path never sets a
+        # non-2xx status in json mode. These stay as defensive status-only
+        # mappings; the bodies use the same shape as every other non-2xx
+        # rejection.
         for status in (402, 429):
-            client, _ = make_client(FakeResponse("limit", status))
+            client, _ = make_client(json_response({"message": "API rate limit exceeded"}, status))
             with self.assertRaises(QuotaError):
                 client.capture("https://example.com/")
 
-    def test_quota_flavoured_in_band_error(self):
-        client, _ = make_client(json_response({"error": "monthly quota exceeded"}))
+    def test_quota_flavoured_capture_failure(self):
+        client, _ = make_client(json_response(app_error_envelope("monthly quota exceeded", 402)))
         with self.assertRaises(QuotaError):
             client.capture("https://example.com/")
 
-    def test_http_400_raises_invalid_params(self):
-        client, _ = make_client(json_response({"error": "width out of range"}, 400))
+    def test_param_flavoured_capture_failure(self):
+        client, _ = make_client(json_response(app_error_envelope("width out of range", 400)))
         with self.assertRaises(InvalidParamsError):
             client.capture("https://example.com/", width=9)
 
-    def test_invalid_flavoured_in_band_error(self):
-        client, _ = make_client(json_response({"error": "unsupported format"}))
+    def test_invalid_flavoured_capture_failure(self):
+        client, _ = make_client(json_response(app_error_envelope("unsupported format", 400)))
         with self.assertRaises(InvalidParamsError):
             client.capture("https://example.com/", format="webp")
 
     def test_render_timeout_reported_by_the_api(self):
-        client, _ = make_client(json_response({"error": "Render timed out"}))
+        client, _ = make_client(json_response(app_error_envelope("Render timed out", 504)))
         with self.assertRaises(SiteShotTimeoutError):
             client.capture("https://example.com/")
 
+    def test_5xx_in_the_apis_json_error_shape_surfaces_its_message(self):
+        # The same {"message": ...} envelope is used for upstream failures as
+        # for rejections, so a 502/503 must be mined the same way.
+        client, _ = make_client(
+            json_response({"message": "Service temporarily unavailable"}, 503)
+        )
+        with self.assertRaises(APIError) as ctx:
+            client.capture("https://example.com/")
+        self.assertEqual(ctx.exception.http_status, 503)
+        self.assertIn("Service temporarily unavailable", str(ctx.exception))
+
     def test_http_500_raises_api_error_with_status_and_body(self):
+        # A non-JSON 5xx is what an HTML error page from the edge looks like.
         client, _ = make_client(FakeResponse("upstream exploded", 500))
         with self.assertRaises(APIError) as ctx:
             client.capture("https://example.com/")
@@ -760,7 +876,9 @@ class RetryTests(SiteShotTestCase):
         self.assertEqual(len(transport.calls), 1)
 
     def test_in_band_errors_are_never_retried(self):
-        client, transport = make_client(json_response({"error": "country_unavailable"}), retries=3)
+        client, transport = make_client(
+            json_response(app_error_envelope("country_unavailable", 503)), retries=3
+        )
         with self.assertRaises(CountryUnavailableError):
             client.capture("https://example.com/", country="DE", strict_country=True)
         self.assertEqual(len(transport.calls), 1)
@@ -938,9 +1056,12 @@ class UrllibTransportTests(SiteShotTestCase):
         self.assertIn("user-agent: site-shot/0.1.0 python", lowered)
 
     def test_http_error_status_is_treated_as_a_response_not_a_connection_failure(self):
-        server = self.serve(reply_json({"error": "invalid userkey"}, 403, "Forbidden"))
+        # Real 403 shape: the API's `message` key.
+        server = self.serve(
+            reply_json({"message": "No active subscription found"}, 403, "Forbidden")
+        )
         client = SiteShot("test-key", base_url=server.base_url)
-        with self.assertRaises(AuthError) as ctx:
+        with self.assertRaises(QuotaError) as ctx:
             client.capture("https://example.com/")
         self.assertEqual(ctx.exception.http_status, 403)
 

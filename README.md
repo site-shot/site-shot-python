@@ -213,7 +213,7 @@ raw response `body` where available.
 | Error | Raised when |
 |---|---|
 | `AuthError` | missing or rejected API key (also raised by the constructor on an empty key) |
-| `QuotaError` | plan quota exhausted / payment required |
+| `QuotaError` | plan quota exhausted, payment required, or no active subscription on the account |
 | `CountryUnavailableError` | `strict_country` capture and the requested country has no capacity right now |
 | `InvalidParamsError` | the API rejected a parameter (out-of-range width, bad format, ...) |
 | `SiteShotTimeoutError` | client-side deadline, or the API reported a render timeout |

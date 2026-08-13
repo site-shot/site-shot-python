@@ -348,6 +348,13 @@ def _strip_data_url_prefix(image: str) -> str:
     return image
 
 
+def _error_text(value: Any) -> Optional[str]:
+    """Return ``value`` when it is a usable error string, else ``None``."""
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
 def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteShotError:
     lower = (error_text or "").lower()
 
@@ -359,14 +366,20 @@ def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteSh
             http_status=status,
             body=body,
         )
-    if _AUTH_PATTERN.search(lower) or status in (401, 403):
+    # 401 is the only status that means "the key itself was rejected": it is
+    # what the API returns for a missing or unknown ``userkey``.
+    if _AUTH_PATTERN.search(lower) or status == 401:
         return AuthError(
             "Site-Shot rejected the API key{0}. Check the key or get one at "
             "https://www.site-shot.com/pricing/.".format(": " + error_text if error_text else ""),
             http_status=status,
             body=body,
         )
-    if status in (402, 429) or _QUOTA_PATTERN.search(lower):
+    # 403 is a *billing* state, not a key problem: the API returns it when the
+    # account has no active subscription, and a bad or missing key is always a
+    # 401. Classifying it as AuthError would send users to check a key that is
+    # perfectly valid.
+    if status in (402, 403, 429) or _QUOTA_PATTERN.search(lower):
         return QuotaError(
             "Site-Shot quota or payment issue{0}.".format(
                 ": " + error_text if error_text else " (HTTP {0})".format(status)
@@ -665,11 +678,28 @@ class SiteShot:
         ok = 200 <= status < 300
 
         if isinstance(envelope, dict):
-            error_text = envelope.get("error")
-            if isinstance(error_text, str) and error_text:
+            # The API uses two different error keys depending on how the
+            # request failed, so both have to be read. The real envelopes are
+            # pinned as fixtures in tests/test_client.py.
+            #
+            # 1. A failure *during capture* comes back as HTTP *200* - the
+            #    failure status does not survive onto the response - with the
+            #    capture envelope carrying ``error`` alongside a placeholder
+            #    error ``image``. Checking ``error`` on every status, not just
+            #    non-2xx, is what stops that placeholder being handed back as if
+            #    it were a screenshot.
+            error_text = _error_text(envelope.get("error"))
+            if error_text is not None:
                 raise _classify_error(status, error_text, envelope)
+
+            # 2. A request rejected *before capture starts* (bad or missing
+            #    key, inactive subscription) comes back on a non-2xx status with
+            #    ``message``. ``message`` is deliberately NOT read on a 2xx:
+            #    only that rejection path uses the key for failures, so treating
+            #    it as an error signal on a successful capture would turn any
+            #    future metadata field named ``message`` into a spurious raise.
             if not ok:
-                raise _classify_error(status, None, envelope)
+                raise _classify_error(status, _error_text(envelope.get("message")), envelope)
             return envelope
 
         if not ok:

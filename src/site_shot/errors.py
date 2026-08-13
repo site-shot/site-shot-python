@@ -47,7 +47,11 @@ class AuthError(SiteShotError):
 
 
 class QuotaError(SiteShotError):
-    """Plan quota exhausted or payment required."""
+    """Plan quota exhausted, payment required, or no active subscription.
+
+    Distinct from :class:`AuthError`: the API key is valid, the plan behind it
+    is not.
+    """
 
 
 class CountryUnavailableError(SiteShotError):
