@@ -48,7 +48,12 @@ _CHUNK_SIZE = 64 * 1024
 #: Params owned by the SDK; silently dropped when passed per call.
 RESERVED_PARAMS = frozenset({"url", "userkey", "response_type", "request_headers"})
 
-_AUTH_PATTERN = re.compile(r"userkey|api.?key|invalid key|unauthoriz|forbidden|authenticat")
+# "forbidden" is deliberately absent from _AUTH_PATTERN. A capture that fails
+# upstream reports the failing HTTP status line verbatim, so ``error`` can read
+# "403 Forbidden" on an otherwise-200 response - a valid key blamed for something
+# it did not cause. A real key rejection always arrives either as a 401 or with
+# text naming the key, credentials or authentication.
+_AUTH_PATTERN = re.compile(r"userkey|api.?key|invalid key|unauthoriz|authenticat")
 _QUOTA_PATTERN = re.compile(r"quota|limit exceed|payment|credit|subscription")
 _INVALID_PATTERN = re.compile(r"invalid|out of range|must be|unsupported")
 _TIMEOUT_PATTERN = re.compile(r"time.?out|timed out")

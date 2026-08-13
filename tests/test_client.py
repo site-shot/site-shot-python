@@ -613,6 +613,20 @@ class ErrorTaxonomyTests(SiteShotTestCase):
             with self.assertRaises(QuotaError):
                 client.capture("https://example.com/")
 
+    def test_upstream_403_forbidden_capture_failure_is_not_blamed_on_the_key(self):
+        # A capture that fails upstream reports the failing HTTP status line
+        # verbatim, so the envelope's `error` reads "403 Forbidden" on an HTTP
+        # 200 response. The word must not be mistaken for a key rejection: the
+        # key is valid, and sending the user off to check it points them at the
+        # wrong problem entirely.
+        client, _ = make_client(json_response(app_error_envelope("403 Forbidden", 403)))
+        with self.assertRaises(APIError) as ctx:
+            client.capture("https://example.com/")
+        error = ctx.exception
+        self.assertNotIsInstance(error, AuthError)
+        self.assertNotIn("rejected the API key", str(error))
+        self.assertIn("403 Forbidden", str(error))
+
     def test_quota_flavoured_capture_failure(self):
         client, _ = make_client(json_response(app_error_envelope("monthly quota exceeded", 402)))
         with self.assertRaises(QuotaError):
