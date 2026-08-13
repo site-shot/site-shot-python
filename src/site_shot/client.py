@@ -76,13 +76,13 @@ class CaptureOptions(TypedDict, total=False):
     zoom: int
     #: Capture the full scrollable page (height capped by ``max_height``).
     full_size: bool
-    #: Height cap for ``full_size`` captures, 100-20000. API default: 15000.
+    #: Height cap for ``full_size`` captures, 100-20000. API default: 20000.
     max_height: int
     #: Scale the result image to this width, 50-10000.
     scaled_width: int
     #: ``"png"`` or ``"jpeg"``. API default: ``"png"``.
     format: str
-    #: Wait this many ms before capturing, 0-60000. API default: 1500.
+    #: Wait this many ms before capturing, 0-60000. API default: 500.
     delay_time: int
     #: Server-side render deadline in ms, 0-120000. API default: 60000.
     timeout: int
@@ -94,7 +94,8 @@ class CaptureOptions(TypedDict, total=False):
     http_proxy: str
     proxy_username: str
     proxy_password: str
-    #: API default: 1.
+    #: Rotate the outbound proxy per attempt. Off by default, and switched on
+    #: automatically when ``country`` is set - pass ``False`` to opt out.
     proxy_rotation: bool
     #: Include the rendered HTML in the JSON result (use with ``capture_json``).
     source_code: bool
