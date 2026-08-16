@@ -186,7 +186,7 @@ class ConstructorTests(SiteShotTestCase):
             self.assertIsInstance(client, SiteShot)
 
     def test_version_is_exported(self):
-        self.assertEqual(__version__, "0.2.0")
+        self.assertEqual(__version__, "0.2.1")
 
 
 class AuthPlacementTests(SiteShotTestCase):
@@ -204,7 +204,7 @@ class AuthPlacementTests(SiteShotTestCase):
         client.capture("https://example.com/")
         headers = {k.lower(): v for k, v in transport.last.headers.items()}
         self.assertEqual(headers["accept"], "application/json")
-        self.assertIn("site-shot/0.2.0", headers["user-agent"])
+        self.assertIn("site-shot/0.2.1", headers["user-agent"])
 
     def test_per_call_userkey_cannot_override_the_constructor_key(self):
         client, transport = make_client()
@@ -1067,7 +1067,7 @@ class UrllibTransportTests(SiteShotTestCase):
         self.assertIn("width=1280", request_line)
         lowered = request.lower()
         self.assertIn("accept: application/json", lowered)
-        self.assertIn("user-agent: site-shot/0.2.0 python", lowered)
+        self.assertIn("user-agent: site-shot/0.2.1 python", lowered)
 
     def test_http_error_status_is_treated_as_a_response_not_a_connection_failure(self):
         # Real 403 shape: the API's `message` key.
