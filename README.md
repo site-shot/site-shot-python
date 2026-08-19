@@ -12,7 +12,8 @@ library only), Python >= 3.9, fully typed (`py.typed`), sync.
 
 API plans from **$5/mo** (X-Lite, 2,000 screenshots). The
 [free browser tool](https://www.site-shot.com/) is no-signup, but the **API
-requires a key** — get one at <https://www.site-shot.com/pricing/>.
+requires a key** — get one at <https://www.site-shot.com/start/>, which walks
+through the key, the install and a first capture in three steps.
 
 ## Quickstart
 
@@ -258,7 +259,8 @@ cent per capture instead of a browser session plus vision tokens per look. The f
 
 ## Links
 
-- Pricing & API keys: <https://www.site-shot.com/pricing/>
+- Quickstart & API keys: <https://www.site-shot.com/start/>
+- Pricing: <https://www.site-shot.com/pricing/>
 - For AI agents & assistants: <https://www.site-shot.com/ai-agents/>
 - Supported countries: <https://www.site-shot.com/countries/>
 - Time zones: <https://www.site-shot.com/time-zones/>
