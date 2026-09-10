@@ -33,6 +33,12 @@ two spellings as the same project).
 Building an AI agent with an MCP-capable client instead? Use the sibling MCP
 server: `npx -y site-shot-mcp`. Working in Node? `npm install site-shot-sdk`.
 
+## CSV → local report example
+
+For a validated CSV, bounded capture workers, saved PNGs, per-row outcomes and an
+escaped local HTML report, see [the runnable CSV report example](examples/README.md).
+It uses the optional `examples` extra; the SDK itself stays zero-dependency.
+
 ## Capture cleanly (ads and cookie banners removed)
 
 ```python

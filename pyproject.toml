@@ -42,6 +42,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+examples = ["Pillow"]
+
 [project.urls]
 Homepage = "https://www.site-shot.com/"
 Documentation = "https://www.site-shot.com/#documentation"
@@ -58,6 +61,7 @@ include = [
     "/src",
     "/tests",
     "/scripts",
+    "/examples",
     "/README.md",
     "/LICENSE",
 ]
@@ -70,7 +74,7 @@ mypy_path = "src"
 # TypedDict broke, and checking only src/ is why that shipped. Bodies are
 # checked everywhere; only the legacy test module is excused from annotating
 # every def.
-files = ["src/site_shot", "tests"]
+files = ["src/site_shot", "tests", "examples/csv_report.py"]
 
 [[tool.mypy.overrides]]
 module = ["test_client", "tests.test_client"]

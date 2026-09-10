@@ -13,3 +13,5 @@ htmlcov/
 *.png
 *.jpeg
 .DS_Store
+reports/
+.env.demo
