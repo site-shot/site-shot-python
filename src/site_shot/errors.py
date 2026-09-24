@@ -64,7 +64,8 @@ class CountryUnavailableError(SiteShotError):
 
 
 class InvalidParamsError(SiteShotError):
-    """The API rejected one of the request parameters (out of range, bad format, ...)."""
+    """A request parameter was rejected, by the SDK before sending (unsupported
+    ``format``) or by the API (out of range, ...)."""
 
 
 class SiteShotTimeoutError(SiteShotError):

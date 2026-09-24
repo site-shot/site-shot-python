@@ -9,6 +9,8 @@ manually as part of the publish checklist:
     SITESHOT_API_KEY=... python scripts/smoke.py
 """
 
+from __future__ import annotations
+
 import os
 import sys
 
@@ -23,6 +25,41 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 MIN_PLAUSIBLE_BYTES = 5_000
 
 
+def _check_png(data: bytes) -> str | None:
+    """Return a failure message, or None if `data` is a plausible PNG."""
+    if not data.startswith(PNG_MAGIC):
+        return "expected PNG magic bytes, got {0} ({1} bytes total)".format(
+            data[:8].hex(), len(data)
+        )
+    if len(data) < MIN_PLAUSIBLE_BYTES:
+        return "image implausibly small ({0} bytes < {1}).".format(
+            len(data), MIN_PLAUSIBLE_BYTES
+        )
+    return None
+
+
+def _check_webp_lossless(data: bytes) -> str | None:
+    """Return a failure message, or None if `data` is a lossless (VP8L) WebP.
+
+    Lossless is judged by the chunk id at byte 12, not by the container: a
+    lossy WebP is also `RIFF....WEBP`, just with a `VP8 ` (with a trailing
+    space) or `VP8X` chunk instead of `VP8L`.
+    """
+    if data[0:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return "expected a RIFF/WEBP container, got {0} ({1} bytes total)".format(
+            data[:12].hex(), len(data)
+        )
+    if data[12:16] != b"VP8L":
+        return "expected a lossless VP8L chunk, got {0!r} ({1} bytes total)".format(
+            data[12:16], len(data)
+        )
+    if len(data) < MIN_PLAUSIBLE_BYTES:
+        return "image implausibly small ({0} bytes < {1}).".format(
+            len(data), MIN_PLAUSIBLE_BYTES
+        )
+    return None
+
+
 def main() -> int:
     key = os.environ.get("SITESHOT_API_KEY", "")
     if not key.strip():
@@ -30,26 +67,21 @@ def main() -> int:
         return 0
 
     client = SiteShot(key)
-    data = client.capture("https://example.com/")
 
-    if not data.startswith(PNG_MAGIC):
-        print(
-            "FAIL: expected PNG magic bytes, got {0} ({1} bytes total)".format(
-                data[:8].hex(), len(data)
-            ),
-            file=sys.stderr,
-        )
+    png = client.capture("https://example.com/")
+    png_failure = _check_png(png)
+    if png_failure is not None:
+        print("FAIL (png): {0}".format(png_failure), file=sys.stderr)
         return 1
-    if len(data) < MIN_PLAUSIBLE_BYTES:
-        print(
-            "FAIL: image implausibly small ({0} bytes < {1}).".format(
-                len(data), MIN_PLAUSIBLE_BYTES
-            ),
-            file=sys.stderr,
-        )
-        return 1
+    print("PASS: live capture returned a plausible PNG ({0} bytes).".format(len(png)))
 
-    print("PASS: live capture returned a plausible PNG ({0} bytes).".format(len(data)))
+    webp = client.capture("https://example.com/", format="webp")
+    webp_failure = _check_webp_lossless(webp)
+    if webp_failure is not None:
+        print("FAIL (webp): {0}".format(webp_failure), file=sys.stderr)
+        return 1
+    print("PASS: live capture returned a plausible lossless WebP ({0} bytes).".format(len(webp)))
+
     return 0
 
 

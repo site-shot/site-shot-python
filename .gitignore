@@ -12,6 +12,8 @@ venv/
 htmlcov/
 *.png
 *.jpeg
+*.jpg
+*.webp
 .DS_Store
 reports/
 .env.demo

@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict
 
 from .errors import (
     APIError,
@@ -33,10 +33,10 @@ from .errors import (
     SiteShotTimeoutError,
 )
 
-__all__ = ["SiteShot", "CaptureOptions", "CaptureResult", "DEFAULT_BASE_URL"]
+__all__ = ["SiteShot", "CaptureOptions", "CaptureResult", "DEFAULT_BASE_URL", "ImageFormat"]
 
 DEFAULT_BASE_URL = "https://api.site-shot.com/"
-SDK_VERSION = "0.2.1"
+SDK_VERSION = "0.3.0"
 
 #: The API's own default server-side render deadline (the ``timeout`` param), ms.
 DEFAULT_SERVER_TIMEOUT_MS = 60_000
@@ -57,6 +57,11 @@ _AUTH_PATTERN = re.compile(r"userkey|api.?key|invalid key|unauthoriz|authenticat
 _QUOTA_PATTERN = re.compile(r"quota|limit exceed|payment|credit|subscription")
 _INVALID_PATTERN = re.compile(r"invalid|out of range|must be|unsupported")
 _TIMEOUT_PATTERN = re.compile(r"time.?out|timed out")
+
+#: Output formats the API renders. ``"webp"`` is lossless WebP; ``"jpg"`` is the
+#: API's own alias of ``"jpeg"``. The API ignores letter case, and so does the SDK.
+ImageFormat = Literal["png", "jpeg", "jpg", "webp"]
+_FORMAT_ALIASES = {"png": "png", "jpeg": "jpeg", "jpg": "jpeg", "webp": "webp"}
 
 
 class CaptureOptions(TypedDict, total=False):
@@ -82,11 +87,17 @@ class CaptureOptions(TypedDict, total=False):
     #: Capture the full scrollable page (height capped by ``max_height``).
     full_size: bool
     #: Height cap for ``full_size`` captures, 100-20000. API default: 20000.
+    #: With ``format="webp"``, a full-page capture taller than 16,383 px is cut
+    #: at 16,383 px from the top -- libwebp's per-side limit.
     max_height: int
     #: Scale the result image to this width, 50-10000.
     scaled_width: int
-    #: ``"png"`` or ``"jpeg"``. API default: ``"png"``.
-    format: str
+    #: ``"png"`` (default) and ``"webp"`` are lossless; ``"webp"`` is about 35%
+    #: smaller than ``"png"`` on a typical page (it varies by page), but capped
+    #: at 16,383 px per side by libwebp. ``"jpeg"`` (alias ``"jpg"``) is lossy.
+    #: Any other value raises :class:`InvalidParamsError` before a request is
+    #: sent. API default: ``"png"``.
+    format: ImageFormat
     #: Wait this many ms before capturing, 0-60000. API default: 500.
     delay_time: int
     #: Server-side render deadline in ms, 0-120000. API default: 60000.
@@ -329,6 +340,22 @@ def _normalize_url(raw: Any) -> str:
     return candidate
 
 
+def _normalize_format(raw: Any) -> Any:
+    """Refuse a format the API cannot render, before a request is spent on it.
+
+    The API does not refuse one up front: it runs the render ladder and then
+    answers with an error card, not a screenshot.
+    """
+    if raw is None or raw == "":
+        return raw  # omitted: the API default (png) applies
+    canonical = _FORMAT_ALIASES.get(raw.lower()) if isinstance(raw, str) else None
+    if canonical is None:
+        raise InvalidParamsError(
+            'Unsupported format: {0!r}. Use "png", "jpeg" (alias "jpg") or "webp".'.format(raw)
+        )
+    return canonical
+
+
 def _append_param(params: List[Tuple[str, str]], key: str, value: Any) -> None:
     if value is None:
         return
@@ -559,6 +586,8 @@ class SiteShot:
         for key, value in options.items():
             if key in RESERVED_PARAMS:
                 continue
+            if key == "format":
+                value = _normalize_format(value)
             _append_param(query, key, value)
         headers = options.get("request_headers")
         if isinstance(headers, collections.abc.Mapping):

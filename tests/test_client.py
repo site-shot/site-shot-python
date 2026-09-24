@@ -186,7 +186,7 @@ class ConstructorTests(SiteShotTestCase):
             self.assertIsInstance(client, SiteShot)
 
     def test_version_is_exported(self):
-        self.assertEqual(__version__, "0.2.1")
+        self.assertEqual(__version__, "0.3.0")
 
 
 class AuthPlacementTests(SiteShotTestCase):
@@ -204,7 +204,7 @@ class AuthPlacementTests(SiteShotTestCase):
         client.capture("https://example.com/")
         headers = {k.lower(): v for k, v in transport.last.headers.items()}
         self.assertEqual(headers["accept"], "application/json")
-        self.assertIn("site-shot/0.2.1", headers["user-agent"])
+        self.assertIn("site-shot/0.3.0", headers["user-agent"])
 
     def test_per_call_userkey_cannot_override_the_constructor_key(self):
         client, transport = make_client()
@@ -637,10 +637,57 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         with self.assertRaises(InvalidParamsError):
             client.capture("https://example.com/", width=9)
 
-    def test_invalid_flavoured_capture_failure(self):
-        client, _ = make_client(json_response(app_error_envelope("unsupported format", 400)))
-        with self.assertRaises(InvalidParamsError):
-            client.capture("https://example.com/", format="webp")
+    def test_refused_format_envelope_is_an_error_not_a_screenshot(self):
+        # derived (api Request.pm _write_error_response + make_error_image.pl):
+        # in json mode - the only mode the SDK uses - a format the renderer
+        # refuses comes back on HTTP 200 as the capture envelope. `error` is the
+        # renderer's status line, "422 Unprocessable Entity", and `image` is an
+        # error card in the requested format (0 bytes on node3/node4). The API
+        # never answers "400 unsupported format", which this test used to invent.
+        body = app_error_envelope("422 Unprocessable Entity", 422)
+        body["image"] = "data:image/gif;base64,"
+        client, _ = make_client(json_response(body))
+        with self.assertRaises(APIError) as ctx:
+            client.capture("https://example.com/")
+        self.assertEqual(ctx.exception.http_status, 200)
+        self.assertIn("422 Unprocessable Entity", str(ctx.exception))
+
+    def test_unsupported_format_is_refused_before_a_request_is_spent(self):
+        # live 2026-09-16/17, image mode: gif/tiff answer HTTP 404 with no
+        # Content-Type and a body of 0 bytes or a 6.29 MB TIFF card, after the
+        # whole render ladder. Nothing about that is worth a request.
+        for bad in ("gif", "tiff", "avif", "webp_lossy", 1, ["png"]):
+            client, transport = make_client()
+            with self.assertRaises(InvalidParamsError):
+                client.capture("https://example.com/", format=bad)
+            with self.assertRaises(InvalidParamsError):
+                client.build_url("https://example.com/", format=bad)
+            self.assertEqual(transport.calls, [])
+
+    def test_every_format_the_api_renders_is_sent_canonical(self):
+        # The API lower-cases `format` and maps jpg to jpeg (Request.pm:3079-3080).
+        cases = (
+            ("png", "png"), ("jpeg", "jpeg"), ("jpg", "jpeg"), ("webp", "webp"),
+            ("WEBP", "webp"), ("PNG", "png"), ("Jpg", "jpeg"),
+        )
+        for given, sent in cases:
+            client, transport = make_client()
+            client.capture("https://example.com/", format=given)
+            self.assertEqual(transport.last.params["format"], [sent])
+
+    def test_omitted_format_sends_nothing(self):
+        for options in ({}, {"format": None}):
+            client, transport = make_client()
+            client.capture("https://example.com/", **options)
+            self.assertNotIn("format", transport.last.params)
+
+    def test_404_with_no_body_is_an_api_error(self):
+        # live 2026-09-16/17, image mode on node3/node4: 404, no Content-Type,
+        # 0 bytes. Pinned defensively: the SDK itself asks for json mode.
+        client, _ = make_client(FakeResponse(b"", 404))
+        with self.assertRaises(APIError) as ctx:
+            client.capture("https://example.com/")
+        self.assertEqual(ctx.exception.http_status, 404)
 
     def test_render_timeout_reported_by_the_api(self):
         client, _ = make_client(json_response(app_error_envelope("Render timed out", 504)))
@@ -1067,7 +1114,7 @@ class UrllibTransportTests(SiteShotTestCase):
         self.assertIn("width=1280", request_line)
         lowered = request.lower()
         self.assertIn("accept: application/json", lowered)
-        self.assertIn("user-agent: site-shot/0.2.1 python", lowered)
+        self.assertIn("user-agent: site-shot/0.3.0 python", lowered)
 
     def test_http_error_status_is_treated_as_a_response_not_a_connection_failure(self):
         # Real 403 shape: the API's `message` key.

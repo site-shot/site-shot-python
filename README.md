@@ -36,7 +36,7 @@ server: `npx -y site-shot-mcp`. Working in Node? `npm install site-shot-sdk`.
 ## CSV → local report example
 
 For a validated CSV, bounded capture workers, saved PNGs, per-row outcomes and an
-escaped local HTML report, see [the runnable CSV report example](examples/README.md).
+escaped local HTML report, see [the runnable CSV report example](https://github.com/site-shot/site-shot-python/blob/main/examples/README.md).
 It uses the optional `examples` extra; the SDK itself stays zero-dependency.
 
 ## Capture cleanly (ads and cookie banners removed)
@@ -140,9 +140,9 @@ SDK update.
 | `height` | int 100–20000 | 768 | viewport height |
 | `zoom` | int 5–1000 | 100 | percentage zoom |
 | `full_size` | bool | False | full-page capture (height capped by `max_height`) |
-| `max_height` | int 100–20000 | 20000 | only meaningful with `full_size` |
+| `max_height` | int 100–20000 | 20000 | only meaningful with `full_size`; with `format="webp"`, a full-page capture taller than 16,383 px is cut at 16,383 px from the top (libwebp's per-side limit) |
 | `scaled_width` | int 50–10000 | — | scale result image to width |
-| `format` | `"png"` \| `"jpeg"` | png | |
+| `format` | `"png"` \| `"jpeg"` \| `"webp"` | png | `"webp"` is lossless, about 35% smaller than PNG on a typical page (it varies by page); `"jpg"` is an alias of `"jpeg"`; case-insensitive; anything else raises `InvalidParamsError` before a request |
 | `delay_time` | int ms 0–60000 | 500 | wait before capture (SPAs, animations) |
 | `timeout` | int ms 0–120000 | 60000 | server-side render deadline |
 | `user_agent` | str | — | custom UA for the rendering browser |
@@ -222,7 +222,7 @@ raw response `body` where available.
 | `AuthError` | missing or rejected API key (also raised by the constructor on an empty key) |
 | `QuotaError` | plan quota exhausted, payment required, or no active subscription on the account |
 | `CountryUnavailableError` | `strict_country` capture and the requested country has no capacity right now |
-| `InvalidParamsError` | the API rejected a parameter (out-of-range width, bad format, ...) |
+| `InvalidParamsError` | a parameter was rejected, by the SDK before sending (unsupported `format`) or by the API (out-of-range width, ...) |
 | `SiteShotTimeoutError` | client-side deadline, or the API reported a render timeout |
 | `APIError` | anything else (server errors, unparseable bodies, connection failures) |
 

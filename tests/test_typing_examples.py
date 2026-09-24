@@ -103,6 +103,17 @@ class ReadmeExamplesTypeCheck(unittest.TestCase):
         self.assertEqual(png, PIXELS)
         self.assertIn("width=1280", transport.urls[-1])
 
+    def test_webp_is_a_typed_format(self) -> None:
+        options: CaptureOptions = {"format": "webp"}
+        client, transport = make_client()
+        webp: bytes = client.capture("https://example.com/", **options)
+        self.assertEqual(webp, PIXELS)
+        self.assertIn("format=webp", transport.urls[-1])
+        # Pins the Literal: loosen `format` back to `str` and this ignore becomes
+        # unused, which `mypy --strict` reports as an error.
+        refused: CaptureOptions = {"format": "gif"}  # type: ignore[typeddict-item]
+        self.assertEqual(refused["format"], "gif")
+
     def test_capture_options_dict_may_carry_url_like_the_typed_dict_declares(self) -> None:
         # `CaptureOptions` declares `url`, so this must type check as well as
         # run. The positional argument wins, exactly like `userkey`.
