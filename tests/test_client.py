@@ -662,6 +662,12 @@ class ErrorTaxonomyTests(SiteShotTestCase):
                 client.capture("https://example.com/", format=bad)
             with self.assertRaises(InvalidParamsError):
                 client.build_url("https://example.com/", format=bad)
+            with self.assertRaises(InvalidParamsError):
+                client.capture_json("https://example.com/", format=bad)
+            with self.assertRaises(InvalidParamsError):
+                client.capture_base64("https://example.com/", format=bad)
+            with self.assertRaises(InvalidParamsError):
+                client.capture_to_file("https://example.com/", "unused.png", format=bad)
             self.assertEqual(transport.calls, [])
 
     def test_every_format_the_api_renders_is_sent_canonical(self):

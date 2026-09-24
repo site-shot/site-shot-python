@@ -347,7 +347,9 @@ def _normalize_format(raw: Any) -> Any:
     answers with an error card, not a screenshot.
     """
     if raw is None or raw == "":
-        return raw  # omitted: the API default (png) applies
+        # None is omitted from the query and the API default (png) applies;
+        # an explicit "" is still sent as a bare `format=`, as it was before.
+        return raw
     canonical = _FORMAT_ALIASES.get(raw.lower()) if isinstance(raw, str) else None
     if canonical is None:
         raise InvalidParamsError(
