@@ -6,11 +6,14 @@ an HTML index for human review. It does not retry failed rows, reuse an old imag
 reduce quality on failure, publish files or export PDF. The service's own rendering
 and routing policy still applies inside each API request.
 
-**API prerequisite:** an account, confirmed email, active paid API plan and API
-key. See [Quickstart](https://www.site-shot.com/start/) and
-[pricing](https://www.site-shot.com/pricing/). The separate free browser tool is
-not a free API trial. Captures consume your plan's allowance; a timeout can happen
-after server work has started. Confirm the budget before running a CSV.
+**API prerequisite:** an account with a confirmed email and its API key. See
+[Quickstart](https://www.site-shot.com/start/) and
+[pricing](https://www.site-shot.com/pricing/). A confirmed account's API key comes
+with a free API trial of 100 captures a month, no card needed; paid plans from
+$5/mo for 2,000 add volume. The separate free browser tool (no signup) is not the
+API. Captures consume your key's allowance (trial or plan): each row is one
+capture, so on the trial a 100-row CSV can spend the whole month. A timeout can
+happen after server work has started. Confirm the budget before running a CSV.
 
 ## Install and run
 

@@ -414,9 +414,12 @@ def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteSh
             body=body,
         )
     # 403 is a *billing* state, not a key problem: the API returns it when the
-    # account has no active subscription, and a bad or missing key is always a
+    # account has no active subscription, has used up the month's free API
+    # trial captures, or asks for a country other than US on the free API trial
+    # (geotargeting needs a paid plan), and a bad or missing key is always a
     # 401. Classifying it as AuthError would send users to check a key that is
-    # perfectly valid.
+    # perfectly valid. (The SSRF guard's "Forbidden target address" is also a
+    # 403 and lands here too, though it is not billing.)
     if status in (402, 403, 429) or _QUOTA_PATTERN.search(lower):
         return QuotaError(
             "Site-Shot quota or payment issue{0}.".format(
