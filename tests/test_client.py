@@ -186,7 +186,7 @@ class ConstructorTests(SiteShotTestCase):
             self.assertIsInstance(client, SiteShot)
 
     def test_version_is_exported(self):
-        self.assertEqual(__version__, "0.3.0")
+        self.assertEqual(__version__, "0.3.1")
 
 
 class AuthPlacementTests(SiteShotTestCase):
@@ -204,7 +204,7 @@ class AuthPlacementTests(SiteShotTestCase):
         client.capture("https://example.com/")
         headers = {k.lower(): v for k, v in transport.last.headers.items()}
         self.assertEqual(headers["accept"], "application/json")
-        self.assertIn("site-shot/0.3.0", headers["user-agent"])
+        self.assertIn("site-shot/0.3.1", headers["user-agent"])
 
     def test_per_call_userkey_cannot_override_the_constructor_key(self):
         client, transport = make_client()
@@ -514,6 +514,22 @@ def app_error_envelope(message: str, internal_status: int) -> Dict[str, Any]:
     }
 
 
+#: The free plan's two refusals, as the API words them. The used-up refusal may
+#: read "Free plan used up: ..." or "Free API trial used up: ...", so both are
+#: here, plus a "Free plan used up" sample with no "paid plan" in it, so that
+#: alternative of the pattern is exercised on its own. Only the prefixes are
+#: the API's; the rest of each text is an example.
+FREE_PLAN_REFUSALS = (
+    "Free plan used up: 100 captures this month. It renews on 2026-11-30 (UTC). "
+    "For more, choose a paid plan: https://www.site-shot.com/pricing/",
+    "Free plan used up: 100 captures this month. It renews on 2026-11-30 (UTC).",
+    "Free API trial used up: 100 captures this month. It renews on 2026-11-30 (UTC). "
+    "For more, choose a plan: https://www.site-shot.com/pricing/",
+    "Geotargeting needs a paid plan: the free plan captures from the default "
+    "location or the US.",
+)
+
+
 class ErrorTaxonomyTests(SiteShotTestCase):
     def test_country_unavailable_envelope_on_http_200(self):
         # derived: a strict_country capture with no capacity fails with
@@ -577,6 +593,38 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         self.assertEqual(error.http_status, 403)
         self.assertEqual(error.body, body)
         self.assertIn("No active subscription found", str(error))
+
+    def test_free_plan_refusals_raise_quota_error_not_auth_error(self):
+        # The month's free-plan captures spent, under either wording, or a
+        # country other than US (a 403 in image mode): a billing state on a
+        # valid key, with the API's
+        # own sentence kept in the error, under whichever key the body carries
+        # it.
+        for text in FREE_PLAN_REFUSALS:
+            for key in ("message", "error"):
+                with self.subTest(text=text[:30], key=key):
+                    body = {key: text}
+                    client, _ = make_client(json_response(body, 403))
+                    with self.assertRaises(QuotaError) as ctx:
+                        client.capture("https://example.com/")
+                    error = ctx.exception
+                    self.assertNotIsInstance(error, AuthError)
+                    self.assertEqual(error.http_status, 403)
+                    self.assertIn(text, str(error))
+                    self.assertNotIn("rejected the API key", str(error))
+
+    def test_free_plan_refusal_text_is_a_quota_error_inside_a_200_envelope(self):
+        # The geotargeting refusal arrives this way in JSON mode (HTTP 200,
+        # text in `error`), and a used-up refusal could too: only the text is
+        # left to classify by, and it must still be a QuotaError, not a
+        # generic APIError.
+        for text in FREE_PLAN_REFUSALS:
+            with self.subTest(text=text[:30]):
+                client, _ = make_client(json_response(app_error_envelope(text, 403)))
+                with self.assertRaises(QuotaError) as ctx:
+                    client.capture("https://example.com/")
+                self.assertEqual(ctx.exception.http_status, 200)
+                self.assertIn(text, str(ctx.exception))
 
     def test_message_on_a_successful_2xx_capture_is_metadata_not_an_error(self):
         # `message` only signals failure on a non-2xx rejection, so it must
@@ -1120,7 +1168,7 @@ class UrllibTransportTests(SiteShotTestCase):
         self.assertIn("width=1280", request_line)
         lowered = request.lower()
         self.assertIn("accept: application/json", lowered)
-        self.assertIn("user-agent: site-shot/0.3.0 python", lowered)
+        self.assertIn("user-agent: site-shot/0.3.1 python", lowered)
 
     def test_http_error_status_is_treated_as_a_response_not_a_connection_failure(self):
         # Real 403 shape: the API's `message` key.

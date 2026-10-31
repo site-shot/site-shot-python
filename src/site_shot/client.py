@@ -36,7 +36,7 @@ from .errors import (
 __all__ = ["SiteShot", "CaptureOptions", "CaptureResult", "DEFAULT_BASE_URL", "ImageFormat"]
 
 DEFAULT_BASE_URL = "https://api.site-shot.com/"
-SDK_VERSION = "0.3.0"
+SDK_VERSION = "0.3.1"
 
 #: The API's own default server-side render deadline (the ``timeout`` param), ms.
 DEFAULT_SERVER_TIMEOUT_MS = 60_000
@@ -54,7 +54,19 @@ RESERVED_PARAMS = frozenset({"url", "userkey", "response_type", "request_headers
 # it did not cause. A real key rejection always arrives either as a 401 or with
 # text naming the key, credentials or authentication.
 _AUTH_PATTERN = re.compile(r"userkey|api.?key|invalid key|unauthoriz|authenticat")
-_QUOTA_PATTERN = re.compile(r"quota|limit exceed|payment|credit|subscription")
+# The free plan's two refusals are matched by text, because a 200 capture
+# envelope leaves only the text to classify by. Once the month's captures are
+# spent the API answers HTTP 403 with {"message": ...} reading "Free plan used
+# up: ..." or "Free API trial used up: ..." - it may use either wording, so both
+# prefixes are matched. A country other than US on the free plan is refused
+# with "Geotargeting needs a paid plan: ..."; with response_type=json, which
+# this SDK always sends, that arrives as HTTP 200 with the text in ``error`` and
+# no image, so only the text makes it a QuotaError. Only these prefixes are
+# stable; the rest of each sentence may change.
+_QUOTA_PATTERN = re.compile(
+    r"quota|limit exceed|payment|credit|subscription"
+    r"|paid plan|free plan used up|free api trial used up"
+)
 _INVALID_PATTERN = re.compile(r"invalid|out of range|must be|unsupported")
 _TIMEOUT_PATTERN = re.compile(r"time.?out|timed out")
 
@@ -414,10 +426,10 @@ def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteSh
             body=body,
         )
     # 403 is a *billing* state, not a key problem: the API returns it when the
-    # account has no active subscription, has used up the month's free API
-    # trial captures, or asks for a country other than US on the free API trial
-    # (geotargeting needs a paid plan), and a bad or missing key is always a
-    # 401. Classifying it as AuthError would send users to check a key that is
+    # account has no active subscription or has used up the free plan's
+    # captures for the month (a country other than US on the free plan is
+    # refused too, but in JSON mode as a 200 envelope matched by text above),
+    # and a bad or missing key is always a 401. Classifying it as AuthError would send users to check a key that is
     # perfectly valid. (The SSRF guard's "Forbidden target address" is also a
     # 403 and lands here too, though it is not billing.)
     if status in (402, 403, 429) or _QUOTA_PATTERN.search(lower):

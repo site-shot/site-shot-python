@@ -47,13 +47,14 @@ class AuthError(SiteShotError):
 
 
 class QuotaError(SiteShotError):
-    """Plan quota exhausted, the month's free API trial captures used up, a
-    ``country`` other than US on the free API trial (HTTP 403; the refused
-    request still counts against the month), payment required, or no active
+    """A paid plan's quota exhausted, the free plan's captures for the month
+    used up, a ``country`` other than US on the free plan (Site-Shot refuses
+    it and returns an error instead of an image; the refused request still
+    counts toward the month's 100), payment required, or no active
     subscription.
 
-    Distinct from :class:`AuthError`: the API key is valid, the plan or trial
-    behind it has nothing left to spend or does not cover the request.
+    Distinct from :class:`AuthError`: the API key is valid, the plan behind it
+    (free or paid) has nothing left to spend or does not cover the request.
     """
 
 

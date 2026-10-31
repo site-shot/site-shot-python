@@ -12,12 +12,13 @@ library only), Python >= 3.9, fully typed (`py.typed`), sync.
 
 The **API requires a key** — get one at <https://www.site-shot.com/start/>, which
 walks through the key, the install and a first capture in three steps. A
-confirmed account's API key comes with a free API trial of 100 captures a month,
-no card needed; paid plans from **$5/mo** (X-Lite, 2,000 screenshots) add volume.
-Accounts confirmed before 2026-10-30 start the trial with one button on `/start/`;
-an account that has had a paid plan before does not get it. Trial captures come
-from the default location or the US; other countries need a paid plan. The
-[free browser tool](https://www.site-shot.com/) is separate and needs no signup.
+confirmed account's API key comes with the free plan: 100 API captures a month,
+no card needed, renewing every month; paid plans start at **$5/mo** (X-Lite,
+2,000 screenshots). Accounts confirmed before 2026-10-30 switch the free plan on
+with one button on `/start/`; an account that has had a paid plan before does not
+get the free plan. Free-plan captures come from the default location or the US;
+other countries need a paid plan.
+The [free browser tool](https://www.site-shot.com/) is separate and needs no signup.
 
 ## Quickstart
 
@@ -91,8 +92,8 @@ url = client.build_url("https://example.com/", width=1280)
 Pass `country` as an **ISO 3166-1 alpha-2 code** (e.g. `"DE"`, `"BR"`, `"JP"` —
 the current list is at <https://www.site-shot.com/countries/>). It automatically
 sets a matching IP, language, time zone, and geolocation. Full country names are
-not valid values. Any `country` other than `"US"` needs a paid plan; free API
-trial captures come from the default location or the US.
+not valid values. Any `country` other than `"US"` needs a paid plan; free-plan
+captures come from the default location or the US.
 
 By default, if the requested country has no capacity at that moment, the API
 silently falls back to a US vantage point. Set `strict_country` to fail fast
@@ -225,7 +226,7 @@ raw response `body` where available.
 | Error | Raised when |
 |---|---|
 | `AuthError` | missing or rejected API key (also raised by the constructor on an empty key) |
-| `QuotaError` | plan quota exhausted, the month's free API trial captures used up (HTTP 403 until the trial renews), a `country` other than US on the free API trial (HTTP 403; the refused request still counts against the month), payment required, or no active subscription on the account |
+| `QuotaError` | a paid plan's quota exhausted, the free plan's 100 captures for the month used up (HTTP 403 until it renews), a `country` other than US on the free plan (Site-Shot refuses it and returns an error instead of an image; the refused request still counts toward the month's 100), payment required, or no active subscription on the account |
 | `CountryUnavailableError` | `strict_country` capture and the requested country has no capacity right now |
 | `InvalidParamsError` | a parameter was rejected, by the SDK before sending (unsupported `format`) or by the API (out-of-range width, ...) |
 | `SiteShotTimeoutError` | client-side deadline, or the API reported a render timeout |

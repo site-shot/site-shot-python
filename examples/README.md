@@ -9,10 +9,10 @@ and routing policy still applies inside each API request.
 **API prerequisite:** an account with a confirmed email and its API key. See
 [Quickstart](https://www.site-shot.com/start/) and
 [pricing](https://www.site-shot.com/pricing/). A confirmed account's API key comes
-with a free API trial of 100 captures a month, no card needed; paid plans from
-$5/mo for 2,000 add volume. The separate free browser tool (no signup) is not the
-API. Captures consume your key's allowance (trial or plan): each row is one
-capture, so on the trial a 100-row CSV can spend the whole month. A timeout can
+with the free plan: 100 API captures a month, no card needed; paid plans start at
+$5/mo for 2,000. The separate free browser tool (no signup) is not the API.
+Captures consume your key's allowance (free or paid plan): each row is one
+capture, so on the free plan a 100-row CSV can spend the whole month. A timeout can
 happen after server work has started. Confirm the budget before running a CSV.
 
 ## Install and run
