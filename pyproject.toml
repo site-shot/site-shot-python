@@ -64,6 +64,7 @@ include = [
     "/scripts",
     "/examples",
     "/README.md",
+    "/CHANGELOG.md",
     "/LICENSE",
 ]
 

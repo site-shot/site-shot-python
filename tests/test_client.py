@@ -203,6 +203,17 @@ class ConstructorTests(SiteShotTestCase):
     def test_version_is_exported(self):
         self.assertEqual(__version__, "0.3.1")
 
+    def test_version_is_the_same_in_every_place_it_is_written(self):
+        # The version is written in pyproject.toml, __init__.py and the
+        # client's User-Agent; a release that bumps one must bump all three.
+        from site_shot.client import SDK_VERSION
+
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+        with open(os.path.join(root, "pyproject.toml"), encoding="utf-8") as handle:
+            declared = [line.split('"')[1] for line in handle if line.startswith("version = ")]
+        self.assertEqual(declared, [__version__])
+        self.assertEqual(SDK_VERSION, __version__)
+
 
 class AuthPlacementTests(SiteShotTestCase):
     def test_key_goes_in_userkey_query_param_never_in_a_header(self):
