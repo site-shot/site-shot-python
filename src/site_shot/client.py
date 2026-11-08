@@ -640,17 +640,12 @@ def _classify_error_without_code(
     # perfectly valid. (The SSRF guard's "Forbidden target address" is also a
     # 403; it is caught as a target refusal above.)
     if status in (402, 403) or _QUOTA_PATTERN.search(lower):
-        # The API's own "No active subscription found" carries no next step.
-        hint = (
-            " Switch on the free plan at https://www.site-shot.com/start/ or choose a "
-            "plan at https://www.site-shot.com/pricing/."
-            if "no active subscription" in lower
-            else ""
-        )
+        # No next step is added to "No active subscription found": former
+        # paying accounts get it and cannot switch on the free plan, and the
+        # wording for them waits on an owner decision.
         return QuotaError(
-            "Site-Shot quota or payment issue{0}.{1}".format(
-                ": " + error_text.rstrip(".") if error_text else " (HTTP {0})".format(status),
-                hint,
+            "Site-Shot quota or payment issue{0}.".format(
+                ": " + error_text.rstrip(".") if error_text else " (HTTP {0})".format(status)
             ),
             http_status=status,
             body=body,

@@ -37,8 +37,7 @@ All notable changes to the `site-shot` package on PyPI.
 - A gateway HTML error page (HTTP 502/504) gives a short message; the page
   stays in `error.body`.
 - Key errors point at <https://www.site-shot.com/start/>, where the key is
-  issued; "No active subscription found" says where to switch on the free plan
-  or choose a plan.
+  issued.
 - Client-side timeout errors say the abandoned capture may still count.
 
 ## 0.3.1 (2026-10-31)

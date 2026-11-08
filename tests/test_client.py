@@ -684,13 +684,15 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         self.assertEqual(error.body, body)
         self.assertIn("No active subscription found", str(error))
 
-    def test_no_active_subscription_names_the_next_step(self):
-        # The API's bare sentence says what is wrong but not what to do.
+    def test_no_active_subscription_does_not_offer_the_free_plan(self):
+        # Former paying accounts get this 403 and cannot switch on the free
+        # plan; their next-step text is held by the owner (FACTS), so the SDK
+        # adds none.
         client, _ = make_client(json_response({"message": "No active subscription found"}, 403))
         with self.assertRaises(QuotaError) as ctx:
             client.capture("https://example.com/")
-        self.assertIn("https://www.site-shot.com/start/", str(ctx.exception))
-        self.assertIn("free plan", str(ctx.exception))
+        self.assertNotIn("free plan", str(ctx.exception))
+        self.assertNotIn("/start/", str(ctx.exception))
 
     def test_free_plan_refusals_raise_quota_error_not_auth_error(self):
         # The month's free-plan captures spent, under either wording, or a
