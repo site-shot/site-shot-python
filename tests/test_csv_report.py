@@ -18,7 +18,13 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from examples import csv_report as report
-from site_shot import APIError, AuthError, SiteShotTimeoutError
+from site_shot import (
+    APIError,
+    AuthError,
+    ConcurrencyLimitError,
+    PageLoadError,
+    SiteShotTimeoutError,
+)
 
 
 def png_bytes() -> bytes:
@@ -49,6 +55,15 @@ class CSVReportTests(unittest.TestCase):
         path = self.root / "input.csv"
         path.write_text(text, encoding="utf-8")
         return path
+
+    def test_parallel_limit_and_unreachable_page_get_their_own_codes(self) -> None:
+        # A 429 from running too many workers is not a quota or payment problem,
+        # and an unresolvable host is not a generic API error.
+        def code(exc: Exception) -> str:
+            return next(c for cls, c in report.ERROR_CODES if isinstance(exc, cls))
+
+        self.assertEqual(code(ConcurrencyLimitError("x", http_status=429)), "parallel_request_limit")
+        self.assertEqual(code(PageLoadError("x")), "page_not_reachable")
 
     def test_public_fixture_has_five_real_owned_pages(self) -> None:
         rows = report.read_rows(Path(__file__).parents[1] / "examples/report_urls.csv")

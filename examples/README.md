@@ -151,8 +151,9 @@ functional test, semantic comparison, an accessibility audit or legal evidence.
   directory is not a completed report.
 
 Errors expose only a fixed code (such as `capture_timeout`,
-`quota_or_payment_required`, `authentication_failed`, `invalid_png` or
-`local_file_error`) and, when available, an HTTP status. Raw exception messages,
+`quota_or_payment_required`, `parallel_request_limit` (more workers than the
+plan runs at once), `page_not_reachable`, `authentication_failed`, `invalid_png`
+or `local_file_error`) and, when available, an HTTP status. Raw exception messages,
 bodies, URLs built by the SDK and API keys are not logged or copied into the
 report. Fix the reported issue deliberately before deciding whether to start a
 **new** billable run; there is no automatic retry/resume path.

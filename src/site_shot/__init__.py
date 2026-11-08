@@ -23,8 +23,10 @@ from .client import (
 from .errors import (
     APIError,
     AuthError,
+    ConcurrencyLimitError,
     CountryUnavailableError,
     InvalidParamsError,
+    PageLoadError,
     QuotaError,
     SiteShotError,
     SiteShotTimeoutError,
@@ -41,9 +43,11 @@ __all__ = [
     "SiteShotError",
     "AuthError",
     "QuotaError",
+    "ConcurrencyLimitError",
     "CountryUnavailableError",
     "InvalidParamsError",
     "SiteShotTimeoutError",
     "APIError",
+    "PageLoadError",
     "__version__",
 ]

@@ -26,8 +26,10 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple,
 from .errors import (
     APIError,
     AuthError,
+    ConcurrencyLimitError,
     CountryUnavailableError,
     InvalidParamsError,
+    PageLoadError,
     QuotaError,
     SiteShotError,
     SiteShotTimeoutError,
@@ -68,6 +70,17 @@ _QUOTA_PATTERN = re.compile(
     r"|paid plan|free plan used up|free api trial used up"
 )
 _INVALID_PATTERN = re.compile(r"invalid|out of range|must be|unsupported")
+# The API's refusals of the target itself: "Malformed target address" for a URL
+# it cannot parse, and the SSRF guard's "Forbidden target address" (a 403) for
+# private and local hosts. Checked before the 403 billing branch.
+_TARGET_PATTERN = re.compile(r"target address")
+# The ss-plugin's 429: "API dedicated workers limit exceeded. Allowed number of
+# parallel requests is N".
+_CONCURRENCY_PATTERN = re.compile(r"workers limit|parallel requests")
+#: ``error_code`` for a target page that could not be opened (unresolvable or
+#: unreachable host). Its ``error`` text reads "504 Gateway Timeout", which is
+#: why the code, not the text, has to decide.
+_PAGE_LOAD_CODES = frozenset({"proxy_navigation_failed"})
 _TIMEOUT_PATTERN = re.compile(r"time.?out|timed out")
 
 #: Output formats the API renders. ``"webp"`` is lossless WebP; ``"jpg"`` is the
@@ -405,14 +418,34 @@ def _error_text(value: Any) -> Optional[str]:
     return None
 
 
-def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteShotError:
-    lower = (error_text or "").lower()
+def _classify_error(
+    status: int, error_text: Optional[str], body: Any, error_code: Optional[str] = None
+) -> SiteShotError:
+    error = _classify_error_without_code(status, error_text, body, error_code)
+    error.error_code = error_code
+    return error
 
-    if lower == "country_unavailable":
+
+def _classify_error_without_code(
+    status: int, error_text: Optional[str], body: Any, error_code: Optional[str]
+) -> SiteShotError:
+    lower = (error_text or "").lower()
+    code = (error_code or "").lower()
+
+    if lower == "country_unavailable" or code == "country_unavailable":
         return CountryUnavailableError(
             "The requested country has no available capacity right now "
             "(country_unavailable). Retry later, or drop strict_country to allow "
             "the default US fallback.",
+            http_status=status,
+            body=body,
+        )
+    if code in _PAGE_LOAD_CODES:
+        return PageLoadError(
+            "Site-Shot could not open the target page ({0}): check that the address "
+            "exists and is reachable from the public internet{1}.".format(
+                code, " (API said: {0})".format(error_text) if error_text else ""
+            ),
             http_status=status,
             body=body,
         )
@@ -425,14 +458,29 @@ def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteSh
             http_status=status,
             body=body,
         )
+    if _TARGET_PATTERN.search(lower):
+        return InvalidParamsError(
+            "Site-Shot refused the target URL: {0}. Only public http(s) web pages "
+            "can be captured.".format((error_text or "").rstrip(".")),
+            http_status=status,
+            body=body,
+        )
+    if status == 429 or _CONCURRENCY_PATTERN.search(lower):
+        return ConcurrencyLimitError(
+            "Site-Shot parallel-request limit reached{0}. Start the next capture when a "
+            "running one finishes (the free plan runs one at a time); this request was "
+            "not counted.".format(": " + error_text.rstrip(".") if error_text else ""),
+            http_status=status,
+            body=body,
+        )
     # 403 is a *billing* state, not a key problem: the API returns it when the
     # account has no active subscription or has used up the free plan's
     # captures for the month (a country other than US on the free plan is
     # refused too, but in JSON mode as a 200 envelope matched by text above),
     # and a bad or missing key is always a 401. Classifying it as AuthError would send users to check a key that is
     # perfectly valid. (The SSRF guard's "Forbidden target address" is also a
-    # 403 and lands here too, though it is not billing.)
-    if status in (402, 403, 429) or _QUOTA_PATTERN.search(lower):
+    # 403; it is caught as a target refusal above.)
+    if status in (402, 403) or _QUOTA_PATTERN.search(lower):
         # The API's own "No active subscription found" carries no next step.
         hint = (
             " Switch on the free plan at https://www.site-shot.com/start/ or choose a "
@@ -752,8 +800,9 @@ class SiteShot:
             #    non-2xx, is what stops that placeholder being handed back as if
             #    it were a screenshot.
             error_text = _error_text(envelope.get("error"))
+            error_code = _error_text(envelope.get("error_code"))
             if error_text is not None:
-                raise _classify_error(status, error_text, envelope)
+                raise _classify_error(status, error_text, envelope, error_code)
 
             # 2. A request rejected *before capture starts* (bad or missing
             #    key, inactive subscription) comes back on a non-2xx status with
@@ -762,7 +811,9 @@ class SiteShot:
             #    it as an error signal on a successful capture would turn any
             #    future metadata field named ``message`` into a spurious raise.
             if not ok:
-                raise _classify_error(status, _error_text(envelope.get("message")), envelope)
+                raise _classify_error(
+                    status, _error_text(envelope.get("message")), envelope, error_code
+                )
             return envelope
 
         if not ok:

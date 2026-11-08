@@ -31,8 +31,10 @@ from PIL import Image
 from site_shot import (
     APIError,
     AuthError,
+    ConcurrencyLimitError,
     CountryUnavailableError,
     InvalidParamsError,
+    PageLoadError,
     QuotaError,
     SiteShot,
     SiteShotError,
@@ -204,10 +206,12 @@ def validate_png(data: bytes) -> tuple[int, int]:
 
 ERROR_CODES = (
     (AuthError, "authentication_failed"),
+    (ConcurrencyLimitError, "parallel_request_limit"),
     (QuotaError, "quota_or_payment_required"),
     (CountryUnavailableError, "country_unavailable"),
     (InvalidParamsError, "invalid_capture_parameters"),
     (SiteShotTimeoutError, "capture_timeout"),
+    (PageLoadError, "page_not_reachable"),
     (APIError, "api_error"),
     (SiteShotError, "capture_error"),
     (InvalidImage, "invalid_png"),

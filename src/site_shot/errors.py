@@ -17,10 +17,12 @@ __all__ = [
     "SiteShotError",
     "AuthError",
     "QuotaError",
+    "ConcurrencyLimitError",
     "CountryUnavailableError",
     "InvalidParamsError",
     "SiteShotTimeoutError",
     "APIError",
+    "PageLoadError",
 ]
 
 
@@ -33,6 +35,7 @@ class SiteShotError(Exception):
         *,
         http_status: Optional[int] = None,
         body: Any = None,
+        error_code: Optional[str] = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -40,6 +43,9 @@ class SiteShotError(Exception):
         self.http_status = http_status
         #: Raw response body or parsed JSON envelope, when available.
         self.body = body
+        #: The API's machine-readable ``error_code`` (for example
+        #: ``"proxy_navigation_failed"``), when the response carried one.
+        self.error_code = error_code
 
 
 class AuthError(SiteShotError):
@@ -58,6 +64,16 @@ class QuotaError(SiteShotError):
     """
 
 
+class ConcurrencyLimitError(QuotaError):
+    """Too many captures at once on this key (HTTP 429): the plan's limit of
+    parallel requests is reached. The free plan runs one capture at a time.
+
+    The refused request is not counted; start it again once a running capture
+    finishes. A subclass of :class:`QuotaError`, so existing handlers still
+    catch it.
+    """
+
+
 class CountryUnavailableError(SiteShotError):
     """The requested ``country`` has no capacity right now.
 
@@ -69,7 +85,8 @@ class CountryUnavailableError(SiteShotError):
 
 class InvalidParamsError(SiteShotError):
     """A request parameter was rejected, by the SDK before sending (unsupported
-    ``format``) or by the API (out of range, ...)."""
+    ``format``, a URL that is not http(s)) or by the API (out of range, a
+    malformed or private target address, ...)."""
 
 
 class SiteShotTimeoutError(SiteShotError):
@@ -78,3 +95,8 @@ class SiteShotTimeoutError(SiteShotError):
 
 class APIError(SiteShotError):
     """Anything else: 5xx responses, unparseable bodies, connection failures."""
+
+
+class PageLoadError(APIError):
+    """The API could not open the target page: the host does not resolve or is
+    unreachable (``error_code`` ``"proxy_navigation_failed"``)."""

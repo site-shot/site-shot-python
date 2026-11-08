@@ -38,8 +38,10 @@ from site_shot import (
     APIError,
     AuthError,
     CaptureOptions,
+    ConcurrencyLimitError,
     CountryUnavailableError,
     InvalidParamsError,
+    PageLoadError,
     QuotaError,
     SiteShot,
     SiteShotError,
@@ -693,6 +695,74 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         self.assertNotIn("rejected the API key", str(error))
         self.assertIn("403 Forbidden", str(error))
 
+    def test_unresolvable_host_is_a_page_load_error_not_a_render_timeout(self):
+        # live 2026-11-08, https://nonexistent-host.invalid/: HTTP 200, the
+        # text reads "504 Gateway Timeout" but error_code says what happened.
+        body = {
+            "error": "504 Gateway Timeout",
+            "error_code": "proxy_navigation_failed",
+            "response": {"status_code": "504", "headers": []},
+        }
+        client, _ = make_client(json_response(body))
+        with self.assertRaises(PageLoadError) as ctx:
+            client.capture("https://nonexistent-host.invalid/")
+        error = ctx.exception
+        self.assertNotIsInstance(error, SiteShotTimeoutError)
+        self.assertIsInstance(error, APIError)
+        self.assertEqual(error.error_code, "proxy_navigation_failed")
+        self.assertEqual(error.http_status, 200)
+        self.assertIn("could not open the target page", str(error))
+        self.assertNotIn("timed out", str(error))
+
+    def test_error_code_is_exposed_on_every_classified_error(self):
+        body = app_error_envelope("country_unavailable", 503)
+        body["error_code"] = "country_unavailable"
+        client, _ = make_client(json_response(body))
+        with self.assertRaises(CountryUnavailableError) as ctx:
+            client.capture("https://example.com/", country="DE", strict_country=True)
+        self.assertEqual(ctx.exception.error_code, "country_unavailable")
+        client, _ = make_client(json_response(app_error_envelope("Render timed out", 504)))
+        with self.assertRaises(SiteShotTimeoutError) as ctx2:
+            client.capture("https://example.com/")
+        self.assertIsNone(ctx2.exception.error_code)
+
+    def test_parallel_request_limit_is_a_concurrency_limit_error(self):
+        # derived: infrastructure ss-plugin handler.lua, the free plan's
+        # one-worker limit (billing/trial.py).
+        text = (
+            "API dedicated workers limit exceeded. Allowed number of parallel "
+            "requests is 1"
+        )
+        for key in ("message", "error"):
+            with self.subTest(key=key):
+                client, _ = make_client(json_response({key: text}, 429))
+                with self.assertRaises(ConcurrencyLimitError) as ctx:
+                    client.capture("https://example.com/")
+                error = ctx.exception
+                # Still a QuotaError, so existing handlers keep catching it.
+                self.assertIsInstance(error, QuotaError)
+                self.assertEqual(error.http_status, 429)
+                self.assertIn(text, str(error))
+                self.assertIn("one at a time", str(error))
+                self.assertNotIn("quota or payment", str(error))
+
+    def test_target_address_refusals_are_invalid_params_not_quota(self):
+        # live 2026-11-08: ftp://example.com/ -> HTTP 200 "Malformed target
+        # address"; derived: the SSRF guard answers 403 "Forbidden target address".
+        cases = (
+            (json_response(app_error_envelope("Malformed target address", 400)), 200),
+            (json_response({"error": "Forbidden target address"}, 403), 403),
+        )
+        for reply, status in cases:
+            client, _ = make_client(reply)
+            with self.assertRaises(InvalidParamsError) as ctx:
+                client.capture("https://example.com/")
+            error = ctx.exception
+            self.assertNotIsInstance(error, QuotaError)
+            self.assertEqual(error.http_status, status)
+            self.assertIn("target address", str(error))
+            self.assertIn("refused the target URL", str(error))
+
     def test_quota_flavoured_capture_failure(self):
         client, _ = make_client(json_response(app_error_envelope("monthly quota exceeded", 402)))
         with self.assertRaises(QuotaError):
@@ -821,6 +891,8 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         for error_class in (
             AuthError,
             QuotaError,
+            ConcurrencyLimitError,
+            PageLoadError,
             CountryUnavailableError,
             InvalidParamsError,
             SiteShotTimeoutError,

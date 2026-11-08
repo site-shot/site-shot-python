@@ -220,16 +220,19 @@ holds no pooled resources, so closing it is a no-op.
 
 ## Errors
 
-Every error is a subclass of `SiteShotError` and carries `http_status` and the
-raw response `body` where available.
+Every error is a subclass of `SiteShotError` and carries `http_status`, the
+raw response `body` and the API's machine-readable `error_code` (for example
+`"proxy_navigation_failed"`) where available.
 
 | Error | Raised when |
 |---|---|
 | `AuthError` | missing or rejected API key (also raised by the constructor on an empty key) |
 | `QuotaError` | a paid plan's quota exhausted, the free plan's 100 captures for the month used up (HTTP 403 until it renews), a `country` other than US on the free plan (Site-Shot refuses it and returns an error instead of an image; the refused request still counts toward the month's 100), payment required, or no active subscription on the account |
+| `ConcurrencyLimitError` | a subclass of `QuotaError`: too many captures at once on this key (HTTP 429). The free plan runs one capture at a time; the refused request is not counted, so start it again when the running one finishes |
 | `CountryUnavailableError` | `strict_country` capture and the requested country has no capacity right now |
-| `InvalidParamsError` | a parameter was rejected, by the SDK before sending (unsupported `format`) or by the API (out-of-range width, ...) |
+| `InvalidParamsError` | a parameter was rejected, by the SDK before sending (unsupported `format`, a URL that is not http(s)) or by the API (out-of-range width, a malformed target address, a private or local host, ...) |
 | `SiteShotTimeoutError` | client-side deadline, or the API reported a render timeout |
+| `PageLoadError` | a subclass of `APIError`: the target page could not be opened, because its host does not resolve or is unreachable (`error_code` `"proxy_navigation_failed"`) |
 | `APIError` | anything else (server errors, unparseable bodies, connection failures) |
 
 ```python
