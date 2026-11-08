@@ -93,8 +93,11 @@ _TARGET_PATTERN = re.compile(r"target address")
 _CONCURRENCY_PATTERN = re.compile(r"workers limit|parallel requests")
 #: ``error_code`` for a target page that could not be opened (unresolvable or
 #: unreachable host). Its ``error`` text reads "504 Gateway Timeout", which is
-#: why the code, not the text, has to decide.
-_PAGE_LOAD_CODES = frozenset({"proxy_navigation_failed"})
+#: why the code, not the text, has to decide. ``dns_lookup_failed`` is the
+#: API's own code for a host that does not resolve (text "Host not found: ...");
+#: until that API change is deployed the same host arrives as
+#: ``proxy_navigation_failed``.
+_PAGE_LOAD_CODES = frozenset({"proxy_navigation_failed", "dns_lookup_failed"})
 _TIMEOUT_PATTERN = re.compile(r"time.?out|timed out")
 
 #: Output formats the API renders. ``"webp"`` is lossless WebP; ``"jpg"`` is the

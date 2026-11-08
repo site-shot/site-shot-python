@@ -830,6 +830,20 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         # body gets the same code, so the message must not say it may not exist.
         self.assertNotIn("exists", str(error))
 
+    def test_dns_lookup_failed_is_a_page_load_error(self):
+        # The API's own code for a host that does not resolve, once the
+        # honest-errors change ships (text "Host not found: <host>. ...").
+        body = {
+            "error": "Host not found: nonexistent-host.invalid. Check the URL for typos.",
+            "error_code": "dns_lookup_failed",
+            "response": {"status_code": "", "headers": []},
+        }
+        client, _ = make_client(json_response(body))
+        with self.assertRaises(PageLoadError) as ctx:
+            client.capture("https://nonexistent-host.invalid/")
+        self.assertEqual(ctx.exception.error_code, "dns_lookup_failed")
+        self.assertNotIn("timed out", str(ctx.exception))
+
     def test_error_code_is_exposed_on_every_classified_error(self):
         body = app_error_envelope("country_unavailable", 503)
         body["error_code"] = "country_unavailable"
