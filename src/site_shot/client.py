@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple, TypedDict
 
 from .errors import (
@@ -30,6 +31,7 @@ from .errors import (
     CountryUnavailableError,
     InvalidParamsError,
     PageLoadError,
+    PartialCaptureWarning,
     QuotaError,
     SiteShotError,
     SiteShotTimeoutError,
@@ -416,6 +418,71 @@ def _error_text(value: Any) -> Optional[str]:
     if isinstance(value, str) and value.strip():
         return value
     return None
+
+
+def _render_headers(envelope: Mapping[str, Any]) -> Tuple[int, Dict[str, str]]:
+    """``response.status_code`` and ``response.headers`` (lower-cased names).
+
+    The API reports the render's own status and headers there, as
+    ``{"status_code": 504, "headers": [{"name": ..., "value": ...}, ...]}``.
+    """
+    response = envelope.get("response")
+    if not isinstance(response, collections.abc.Mapping):
+        return 0, {}
+    try:
+        inner_status = int(str(response.get("status_code")))
+    except (TypeError, ValueError):
+        inner_status = 0
+    headers: Dict[str, str] = {}
+    raw = response.get("headers")
+    if isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, collections.abc.Mapping) and isinstance(entry.get("name"), str):
+                headers[entry["name"].lower()] = str(entry.get("value", ""))
+    return inner_status, headers
+
+
+def _is_set(value: Optional[str]) -> bool:
+    return value is not None and value.strip().lower() not in ("", "0", "false", "no")
+
+
+def _check_render_outcome(status: int, envelope: CaptureResult) -> None:
+    """Refuse an error card the API delivered as a successful capture.
+
+    When a render fails late (typically at its timeout) the API can answer
+    HTTP 200 with no ``error`` key, an image, ``response.status_code`` >= 500
+    and an ``X-WS-Error-Code`` render header. With ``X-WS-Fallback-Capture`` or
+    ``X-WS-Timeout-Recovered`` set, the image is the frame the browser had when
+    time ran out: real, possibly incomplete, so it is returned with a
+    :class:`PartialCaptureWarning`. Without either, the image is the renderer's
+    error card, and returning it would hand the user a picture of an error as
+    their screenshot.
+    """
+    inner_status, headers = _render_headers(envelope)
+    code = _error_text(headers.get("x-ws-error-code"))
+    if inner_status < 500 or code is None:
+        return
+    if _is_set(headers.get("x-ws-fallback-capture")) or _is_set(
+        headers.get("x-ws-timeout-recovered")
+    ):
+        warnings.warn(
+            PartialCaptureWarning(
+                "Site-Shot returned the frame captured when the render stopped ({0}, "
+                "render status {1}); the page may not have finished loading.".format(
+                    code, inner_status
+                )
+            ),
+            stacklevel=5,
+        )
+        return
+    error_class = SiteShotTimeoutError if _TIMEOUT_PATTERN.search(code.lower()) else APIError
+    raise error_class(
+        "Site-Shot returned an error card instead of a screenshot ({0}, render status "
+        "{1}). The capture may still count toward your allowance.".format(code, inner_status),
+        http_status=status,
+        body=envelope,
+        error_code=code,
+    )
 
 
 def _classify_error(
@@ -814,6 +881,9 @@ class SiteShot:
                 raise _classify_error(
                     status, _error_text(envelope.get("message")), envelope, error_code
                 )
+            # 3. A late render failure can arrive with neither key: see
+            #    _check_render_outcome.
+            _check_render_outcome(status, envelope)
             return envelope
 
         if not ok:

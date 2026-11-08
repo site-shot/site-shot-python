@@ -27,9 +27,11 @@ from .errors import (
     CountryUnavailableError,
     InvalidParamsError,
     PageLoadError,
+    PartialCaptureWarning,
     QuotaError,
     SiteShotError,
     SiteShotTimeoutError,
+    SiteShotWarning,
 )
 
 __version__ = "0.3.1"
@@ -49,5 +51,7 @@ __all__ = [
     "SiteShotTimeoutError",
     "APIError",
     "PageLoadError",
+    "SiteShotWarning",
+    "PartialCaptureWarning",
     "__version__",
 ]

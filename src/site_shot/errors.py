@@ -23,6 +23,8 @@ __all__ = [
     "SiteShotTimeoutError",
     "APIError",
     "PageLoadError",
+    "SiteShotWarning",
+    "PartialCaptureWarning",
 ]
 
 
@@ -100,3 +102,15 @@ class APIError(SiteShotError):
 class PageLoadError(APIError):
     """The API could not open the target page: the host does not resolve or is
     unreachable (``error_code`` ``"proxy_navigation_failed"``)."""
+
+
+class SiteShotWarning(UserWarning):
+    """Base class for warnings the Site-Shot SDK emits."""
+
+
+class PartialCaptureWarning(SiteShotWarning):
+    """The render hit its timeout and the API returned the frame it had by then.
+
+    The image is real, but the page may not have finished loading. Turn it into
+    an exception with ``warnings.simplefilter("error", PartialCaptureWarning)``.
+    """

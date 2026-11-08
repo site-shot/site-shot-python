@@ -26,6 +26,7 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from unittest import mock
 
@@ -42,6 +43,7 @@ from site_shot import (
     CountryUnavailableError,
     InvalidParamsError,
     PageLoadError,
+    PartialCaptureWarning,
     QuotaError,
     SiteShot,
     SiteShotError,
@@ -762,6 +764,76 @@ class ErrorTaxonomyTests(SiteShotTestCase):
             self.assertEqual(error.http_status, status)
             self.assertIn("target address", str(error))
             self.assertIn("refused the target URL", str(error))
+
+    def test_timeout_card_delivered_as_a_capture_is_an_error(self):
+        # derived (memory of the API's renderer card path, 2026-10-27): HTTP
+        # 200, no `error`, an image, response.status_code 504 and the render's
+        # X-WS-Error-Code, without the recovered-frame headers. The image is
+        # the renderer's error card and must never reach disk.
+        body = {
+            "image": "data:image/png;base64,{0}".format(PIXELS_B64),
+            "response": {
+                "status_code": "504",
+                "headers": [{"name": "X-WS-Error-Code", "value": "screenshot_capture_timeout"}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shot.png")
+            for call in (
+                lambda c: c.capture("https://example.com/"),
+                lambda c: c.capture_json("https://example.com/"),
+                lambda c: c.capture_to_file("https://example.com/", path),
+            ):
+                client, _ = make_client(json_response(body))
+                with self.assertRaises(SiteShotTimeoutError) as ctx:
+                    call(client)
+                self.assertEqual(ctx.exception.error_code, "screenshot_capture_timeout")
+                self.assertIn("may still count", str(ctx.exception))
+            self.assertFalse(os.path.exists(path))
+
+    def test_recovered_timeout_frame_is_returned_with_a_warning(self):
+        # live 2026-11-08, timeout=1000 delay_time=5000: a real frame, flagged
+        # by the API as recovered after the render timeout.
+        body = {
+            "image": PIXELS_B64,
+            "response": {
+                "status_code": 504,
+                "headers": [
+                    {"name": "X-WS-Error-Code", "value": "screenshot_capture_timeout"},
+                    {"name": "X-WS-Fallback-Capture", "value": "true"},
+                    {"name": "X-WS-Timeout-Recovered", "value": "true"},
+                ],
+            },
+        }
+        client, _ = make_client(json_response(body))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertEqual(client.capture("https://example.com/"), PIXELS)
+        partial = [w for w in caught if issubclass(w.category, PartialCaptureWarning)]
+        self.assertEqual(len(partial), 1)
+        self.assertIn("may not have finished loading", str(partial[0].message))
+        # And it can be made strict.
+        client, _ = make_client(json_response(body))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", PartialCaptureWarning)
+            with self.assertRaises(PartialCaptureWarning):
+                client.capture("https://example.com/")
+
+    def test_ordinary_capture_with_render_headers_raises_and_warns_nothing(self):
+        for status_code, headers in (
+            (200, [{"name": "Content-Type", "value": "text/html"}]),
+            # A target page answering 5xx is still a faithful screenshot of it.
+            (503, [{"name": "Content-Type", "value": "text/html"}]),
+            ("200", []),
+        ):
+            body = {
+                "image": PIXELS_B64,
+                "response": {"status_code": status_code, "headers": headers},
+            }
+            client, _ = make_client(json_response(body))
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                self.assertEqual(client.capture("https://example.com/"), PIXELS)
 
     def test_quota_flavoured_capture_failure(self):
         client, _ = make_client(json_response(app_error_envelope("monthly quota exceeded", 402)))

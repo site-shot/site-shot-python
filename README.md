@@ -247,8 +247,21 @@ except SiteShotError as e:
 ```
 
 Under the hood the SDK always asks the API for a JSON response and decodes the
-image itself — so errors surface as typed exceptions instead of an error picture
-pretending to be your screenshot.
+image itself, so it can tell a failed render from a screenshot: an error the API
+reports, or an error card it delivers as a capture, raises a typed exception
+instead of being handed back as your image.
+
+One case is in between: when a render reaches its `timeout`, the API may return
+the frame the browser had by then. That image is real but the page may not have
+finished loading, so the SDK returns it and emits a `PartialCaptureWarning`. To
+treat it as a failure:
+
+```python
+import warnings
+from site_shot import PartialCaptureWarning
+
+warnings.simplefilter("error", PartialCaptureWarning)
+```
 
 ## Retries
 
@@ -263,7 +276,7 @@ sensible setting for `country=` captures.
 If your agent drives a browser, it can screenshot pages itself — the right tool for pages that must
 be signed into or stepped through a flow. For public URLs, delegating the capture to the API is
 usually better engineering: the same pipeline on every request, country-specific vantage points
-(`country` + `strict_country`), every frame validated before it is returned, and a fraction of a
+(`country` + `strict_country`), failed renders raised as typed errors, and a fraction of a
 cent per capture instead of a browser session plus vision tokens per look. The full comparison:
 [AI agent vs. screenshot API — who should capture the page](https://www.site-shot.com/blog/ai-agent-vs-screenshot-api/).
 
