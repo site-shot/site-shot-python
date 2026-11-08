@@ -23,9 +23,10 @@ All notable changes to the `site-shot` package on PyPI.
 
 ### Changed
 
-- An error card the API delivers as a successful capture (render status 5xx
-  with an `X-WS-Error-Code` render header) raises `SiteShotTimeoutError`
-  instead of being returned as the screenshot.
+- The renderer's error card the API delivers as a successful capture (render
+  status 5xx, `X-WS-Error-Code: screenshot_capture_timeout`, and no
+  frame-kept header) raises `SiteShotTimeoutError` instead of being returned
+  as the screenshot. The rule is the API's own.
 - A requested `source_code` missing from the result raises
   `SiteShotTimeoutError` instead of leaving the key out.
 - URLs with a scheme other than http(s) (`ftp:`, `file:`, `javascript:`, ...)

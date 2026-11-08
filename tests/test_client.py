@@ -895,6 +895,52 @@ class ErrorTaxonomyTests(SiteShotTestCase):
             with self.assertRaises(PartialCaptureWarning):
                 client.capture("https://example.com/")
 
+    def test_every_frame_kept_header_returns_the_frame_with_a_warning(self):
+        # derived (api 4e5a549, @RENDERER_FRAME_KEPT_HEADERS): any of the four
+        # headers set to true means the image is a real frame, already
+        # counted, and must be returned, not refused as the card.
+        for name in (
+            "X-WS-Fallback-Capture",
+            "X-WS-Timeout-Recovered",
+            "X-WS-Full-Scroll-Timeout",
+            "X-WS-Challenge-Fallback-Capture",
+        ):
+            with self.subTest(header=name):
+                body = {
+                    "image": PIXELS_B64,
+                    "response": {
+                        "status_code": 503,
+                        "headers": [
+                            {"name": "X-WS-Error-Code", "value": "screenshot_capture_timeout"},
+                            {"name": name, "value": "true"},
+                        ],
+                    },
+                }
+                client, _ = make_client(json_response(body))
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    self.assertEqual(client.capture("https://example.com/"), PIXELS)
+                partial = [w for w in caught if issubclass(w.category, PartialCaptureWarning)]
+                self.assertEqual(len(partial), 1)
+
+    def test_rendered_server_error_page_is_returned_as_a_screenshot(self):
+        # derived (api Request.pm: a target that rendered its own error page
+        # "keeps the behaviour it has always had"): only screenshot_capture_timeout
+        # marks the card.
+        for code in ("http_server_error", "some_future_code"):
+            with self.subTest(code=code):
+                body = {
+                    "image": PIXELS_B64,
+                    "response": {
+                        "status_code": 503,
+                        "headers": [{"name": "X-WS-Error-Code", "value": code}],
+                    },
+                }
+                client, _ = make_client(json_response(body))
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error")
+                    self.assertEqual(client.capture("https://example.com/"), PIXELS)
+
     def test_ordinary_capture_with_render_headers_raises_and_warns_nothing(self):
         for status_code, headers in (
             (200, [{"name": "Content-Type", "value": "text/html"}]),

@@ -523,25 +523,39 @@ def _is_set(value: Optional[str]) -> bool:
     return value is not None and value.strip().lower() not in ("", "0", "false", "no")
 
 
-def _check_render_outcome(status: int, envelope: CaptureResult) -> None:
-    """Refuse an error card the API delivered as a successful capture.
+#: Render headers that say the image is a frame the browser really had when
+#: the render stopped, not the renderer's error card. The same list as the
+#: API's own card check (``@RENDERER_FRAME_KEPT_HEADERS``).
+_FRAME_KEPT_HEADERS = (
+    "x-ws-fallback-capture",
+    "x-ws-timeout-recovered",
+    "x-ws-full-scroll-timeout",
+    "x-ws-challenge-fallback-capture",
+)
 
-    When a render fails late (typically at its timeout) the API can answer
-    HTTP 200 with no ``error`` key, an image, ``response.status_code`` >= 500
-    and an ``X-WS-Error-Code`` render header. With ``X-WS-Fallback-Capture`` or
-    ``X-WS-Timeout-Recovered`` set, the image is the frame the browser had when
-    time ran out: real, possibly incomplete, so it is returned with a
-    :class:`PartialCaptureWarning`. Without either, the image is the renderer's
-    error card, and returning it would hand the user a picture of an error as
-    their screenshot.
+#: The only render error code the API delivers its error card under.
+_CARD_ERROR_CODE = "screenshot_capture_timeout"
+
+
+def _check_render_outcome(status: int, envelope: CaptureResult) -> None:
+    """Refuse the renderer's error card the API delivered as a capture.
+
+    Mirrors the API's own rule: when a render times out with no frame to keep,
+    the API can answer HTTP 200 with no ``error`` key, an image,
+    ``response.status_code`` >= 500 and ``X-WS-Error-Code:
+    screenshot_capture_timeout``. That image is the renderer's error card, and
+    returning it would hand the user a picture of an error as their
+    screenshot. When one of the frame-kept headers is ``true``, the image is
+    the frame the browser had when the render stopped: real, possibly
+    incomplete, so it is returned with a :class:`PartialCaptureWarning`. Any
+    other render error code on a 5xx page (``http_server_error``: the site
+    rendered its own error page) is a faithful screenshot and is returned.
     """
     inner_status, headers = _render_headers(envelope)
     code = _error_text(headers.get("x-ws-error-code"))
     if inner_status < 500 or code is None:
         return
-    if _is_set(headers.get("x-ws-fallback-capture")) or _is_set(
-        headers.get("x-ws-timeout-recovered")
-    ):
+    if any(headers.get(name, "").strip().lower() == "true" for name in _FRAME_KEPT_HEADERS):
         warnings.warn(
             PartialCaptureWarning(
                 "Site-Shot returned the frame captured when the render stopped ({0}, "
@@ -552,8 +566,9 @@ def _check_render_outcome(status: int, envelope: CaptureResult) -> None:
             stacklevel=5,
         )
         return
-    error_class = SiteShotTimeoutError if _TIMEOUT_PATTERN.search(code.lower()) else APIError
-    raise error_class(
+    if code.lower() != _CARD_ERROR_CODE:
+        return
+    raise SiteShotTimeoutError(
         "Site-Shot returned an error card instead of a screenshot ({0}, render status "
         "{1}). The capture may still count toward your allowance.".format(code, inner_status),
         http_status=status,
