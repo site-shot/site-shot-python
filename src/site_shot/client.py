@@ -450,8 +450,8 @@ def _normalize_url(raw: Any) -> str:
     scheme = _SCHEME_PATTERN.match(trimmed)
     if scheme and (scheme.group(1) or scheme.group(2)).lower() not in ("http", "https"):
         raise InvalidParamsError(
-            'Unsupported URL scheme in "{0}": only http(s) web pages can be captured.'.format(
-                trimmed
+            'Unsupported URL scheme "{0}:": only http(s) web pages can be captured.'.format(
+                (scheme.group(1) or scheme.group(2)).lower()
             )
         )
     candidate = trimmed if re.match(r"^https?://", trimmed, re.IGNORECASE) else "https://" + trimmed
@@ -621,8 +621,8 @@ def _classify_error_without_code(
         )
     if code in _PAGE_LOAD_CODES:
         return PageLoadError(
-            "Site-Shot could not open the target page ({0}): check that the address "
-            "exists and is reachable from the public internet{1}.".format(
+            "Site-Shot could not open the target page ({0}): the host did not resolve, "
+            "was unreachable, or answered without a page{1}.".format(
                 code, " (API said: {0})".format(error_text) if error_text else ""
             ),
             http_status=status,
@@ -1016,9 +1016,16 @@ class SiteShot:
                 # stays in ``body``.
                 if status >= 500:
                     reason = http.client.responses.get(status, "")
+                    # A 504 can come after the API admitted the request.
+                    counted = (
+                        " The API may still have run the capture, and it may count toward "
+                        "your allowance."
+                        if status == 504
+                        else ""
+                    )
                     raise APIError(
                         "Site-Shot API returned HTTP {0}{1} from its gateway; try again "
-                        "shortly.".format(status, " " + reason if reason else ""),
+                        "shortly.{2}".format(status, " " + reason if reason else "", counted),
                         http_status=status,
                         body=text,
                     )

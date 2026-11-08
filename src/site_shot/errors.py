@@ -100,8 +100,9 @@ class APIError(SiteShotError):
 
 
 class PageLoadError(APIError):
-    """The API could not open the target page: the host does not resolve or is
-    unreachable (``error_code`` ``"proxy_navigation_failed"``)."""
+    """The API could not open the target page: the host did not resolve, was
+    unreachable, or answered without a page (``error_code``
+    ``"proxy_navigation_failed"``)."""
 
 
 class SiteShotWarning(UserWarning):

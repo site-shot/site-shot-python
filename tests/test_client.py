@@ -538,6 +538,8 @@ class BuildUrlTests(SiteShotTestCase):
                 with self.assertRaises(InvalidParamsError) as ctx:
                     client.capture(bad)
                 self.assertIn("only http(s)", str(ctx.exception))
+                # The scheme alone: a data: URL can be megabytes long.
+                self.assertNotIn(bad, str(ctx.exception))
                 with self.assertRaises(InvalidParamsError):
                     client.build_url(bad)
                 self.assertEqual(transport.calls, [])
@@ -824,6 +826,9 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         self.assertEqual(error.http_status, 200)
         self.assertIn("could not open the target page", str(error))
         self.assertNotIn("timed out", str(error))
+        # live 2026-11-08: a host that exists and answers 503 with an empty
+        # body gets the same code, so the message must not say it may not exist.
+        self.assertNotIn("exists", str(error))
 
     def test_error_code_is_exposed_on_every_classified_error(self):
         body = app_error_envelope("country_unavailable", 503)
@@ -1100,6 +1105,8 @@ class ErrorTaxonomyTests(SiteShotTestCase):
                 self.assertNotIn("<", str(error))
                 self.assertIn("HTTP {0}".format(status), str(error))
                 self.assertIn("try again", str(error))
+                # Only a 504 can follow an admitted capture.
+                self.assertEqual("may count" in str(error), status == 504)
                 self.assertEqual(error.body, page)
 
     def test_plain_text_rejections_keep_their_text(self):

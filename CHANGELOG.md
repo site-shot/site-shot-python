@@ -7,8 +7,8 @@ All notable changes to the `site-shot` package on PyPI.
 ### Added
 
 - `PageLoadError` (a subclass of `APIError`): the target page could not be
-  opened because its host does not resolve or is unreachable
-  (`error_code` `"proxy_navigation_failed"`). Before, this was reported as a
+  opened because its host did not resolve, was unreachable, or answered
+  without a page (`error_code` `"proxy_navigation_failed"`). Before, this was reported as a
   render timeout.
 - `ConcurrencyLimitError` (a subclass of `QuotaError`): too many captures at
   once on the key (HTTP 429). The free plan runs one capture at a time.
@@ -35,7 +35,7 @@ All notable changes to the `site-shot` package on PyPI.
   ("Forbidden target address") raise `InvalidParamsError`, not
   `APIError`/`QuotaError`.
 - A gateway HTML error page (HTTP 502/504) gives a short message; the page
-  stays in `error.body`.
+  stays in `error.body`. On a 504 it says the capture may still count.
 - Key errors point at <https://www.site-shot.com/start/>, where the key is
   issued.
 - Client-side timeout errors say the abandoned capture may still count.

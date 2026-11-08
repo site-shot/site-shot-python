@@ -243,7 +243,7 @@ raw response `body` and the API's machine-readable `error_code` (for example
 | `CountryUnavailableError` | `strict_country` capture and the requested country has no capacity right now |
 | `InvalidParamsError` | a parameter was rejected, by the SDK before sending (unsupported `format`, a URL that is not http(s)) or by the API (out-of-range width, a malformed target address, a private or local host, ...) |
 | `SiteShotTimeoutError` | client-side deadline, or the API reported a render timeout |
-| `PageLoadError` | a subclass of `APIError`: the target page could not be opened, because its host does not resolve or is unreachable (`error_code` `"proxy_navigation_failed"`) |
+| `PageLoadError` | a subclass of `APIError`: the target page could not be opened, because its host did not resolve, was unreachable, or answered without a page (`error_code` `"proxy_navigation_failed"`) |
 | `APIError` | anything else (server errors, unparseable bodies, connection failures) |
 
 ```python
