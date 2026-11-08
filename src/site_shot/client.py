@@ -18,7 +18,9 @@ import os
 import random
 import re
 import socket
+import sys
 import time
+import types
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -200,6 +202,24 @@ _PARAM_ALIASES = {
 }
 
 
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _caller_stacklevel() -> int:
+    """The ``stacklevel`` that attributes a warning to the first frame outside
+    this package, whichever public method the user called."""
+    level = 1
+    frame: Optional[types.FrameType] = sys._getframe(1)
+    while frame is not None and _in_package(frame.f_code.co_filename):
+        frame = frame.f_back
+        level += 1
+    return level
+
+
+def _in_package(filename: str) -> bool:
+    return os.path.dirname(os.path.abspath(filename)) == _PACKAGE_DIR
+
+
 def _warn_unknown_param(key: str) -> None:
     """Warn when an unknown option name looks like a typo of a known one.
 
@@ -219,7 +239,7 @@ def _warn_unknown_param(key: str) -> None:
             'Unknown capture option "{0}" (did you mean "{1}"?). It is sent as is, '
             "and the API ignores names it does not know.".format(key, guess)
         ),
-        stacklevel=4,
+        stacklevel=_caller_stacklevel(),
     )
 
 
@@ -563,7 +583,7 @@ def _check_render_outcome(status: int, envelope: CaptureResult) -> None:
                     code, inner_status
                 )
             ),
-            stacklevel=5,
+            stacklevel=_caller_stacklevel(),
         )
         return
     if code.lower() != _CARD_ERROR_CODE:

@@ -276,6 +276,37 @@ class ParamSerializationTests(SiteShotTestCase):
                 # Still passed through, as documented.
                 self.assertEqual(transport.last.param(typo), "1")
 
+    def test_warnings_point_at_the_callers_line(self):
+        # Pointing at an SDK line instead hides where the call is, and the
+        # default filter then shows a warning repeated in a loop only once.
+        partial = {
+            "image": PIXELS_B64,
+            "response": {
+                "status_code": 504,
+                "headers": [
+                    {"name": "X-WS-Error-Code", "value": "screenshot_capture_timeout"},
+                    {"name": "X-WS-Timeout-Recovered", "value": "true"},
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shot.png")
+            calls = (
+                lambda c, **kw: c.capture("https://example.com/", **kw),
+                lambda c, **kw: c.capture_base64("https://example.com/", **kw),
+                lambda c, **kw: c.capture_json("https://example.com/", **kw),
+                lambda c, **kw: c.capture_to_file("https://example.com/", path, **kw),
+            )
+            for index, call in enumerate(calls):
+                for reply, extra in ((json_response(partial), {}), (None, {"full_page": 1})):
+                    with self.subTest(call=index, options=extra):
+                        client, _ = make_client(reply) if reply else make_client()
+                        with warnings.catch_warnings(record=True) as caught:
+                            warnings.simplefilter("always")
+                            call(client, **extra)
+                        self.assertEqual(len(caught), 1)
+                        self.assertEqual(caught[0].filename, __file__)
+
     def test_known_and_unrelated_options_do_not_warn(self):
         client, _ = make_client()
         with warnings.catch_warnings():
