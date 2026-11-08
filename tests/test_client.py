@@ -1025,6 +1025,17 @@ class DrippingHTTPResponse:
 
 
 class TimeoutTests(SiteShotTestCase):
+    def test_client_deadline_error_says_the_capture_may_still_count(self):
+        # The API is not told the client gave up: a render it kept working on
+        # (a retry on another route can outlast the default deadline) counts.
+        for exc in (socket.timeout("timed out"), urllib.error.URLError(socket.timeout("x"))):
+            client, _ = make_client(exc)
+            with self.assertRaises(SiteShotTimeoutError) as ctx:
+                client.capture("https://example.com/")
+            self.assertIn("client-side deadline", str(ctx.exception))
+            self.assertIn("may count toward your allowance", str(ctx.exception))
+            self.assertIn("SiteShot(timeout=", str(ctx.exception))
+
     def test_connect_timeout_raises_site_shot_timeout_error(self):
         client, transport = make_client(socket.timeout("timed out"), timeout=0.05)
         with self.assertRaises(SiteShotTimeoutError):

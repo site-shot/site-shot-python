@@ -215,6 +215,12 @@ Two different things are called "timeout", exactly as in the HTTP API:
 - the capture option `timeout` is the **server-side render deadline in
   milliseconds** (the verbatim HTTP param name).
 
+The default client deadline (the render `timeout` plus 30 s) covers one render
+attempt. When the API retries a slow page on another route the request can run
+longer; the SDK then raises `SiteShotTimeoutError`, and the abandoned capture
+may still count toward your allowance. For pages you
+know are slow, pass a longer client deadline, for example `SiteShot(timeout=180)`.
+
 `SiteShot` also works as a context manager (`with SiteShot(...) as client:`); it
 holds no pooled resources, so closing it is a no-op.
 

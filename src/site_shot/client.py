@@ -47,6 +47,14 @@ DEFAULT_SERVER_TIMEOUT_MS = 60_000
 #: Client-side headroom on top of the server deadline, so the server answers first.
 CLIENT_TIMEOUT_HEADROOM_S = 30.0
 
+#: Appended to every client-side deadline error. The API may retry a slow page
+#: on another route and so outlast the default deadline; the request it was
+#: working on is not cancelled by the client giving up.
+_CLIENT_TIMEOUT_HINT = (
+    "The API may still have run the capture, and it may count toward your "
+    "allowance. For slow pages, pass a longer deadline: SiteShot(timeout=...)."
+)
+
 _CHUNK_SIZE = 64 * 1024
 
 #: Params owned by the SDK; silently dropped when passed per call.
@@ -602,8 +610,10 @@ class SiteShot:
     :param timeout: Client-side deadline **in seconds**, bounding the whole
         exchange: connecting, waiting for the status line and headers, and
         downloading the body. Default: the per-call server
-        ``timeout`` param (or its API default of 60000 ms) plus 30 s headroom,
-        so the server always gets to answer first. Note the per-call ``timeout``
+        ``timeout`` param (or its API default of 60000 ms) plus 30 s headroom.
+        That covers one render attempt; when the API retries a slow page on
+        another route it can take longer, the client gives up first, and the
+        abandoned capture may still count. Note the per-call ``timeout``
         capture option is a different thing: the server-side render deadline, in
         milliseconds, named verbatim after the HTTP param.
     :param retries: Retries for **connection-level failures only** (DNS,
@@ -764,8 +774,8 @@ class SiteShot:
             except Exception as exc:  # noqa: BLE001 - re-raised classified below
                 if _is_timeout(exc):
                     raise SiteShotTimeoutError(
-                        "Site-Shot request timed out after {0:g} s "
-                        "(client-side deadline).".format(timeout_s)
+                        ("Site-Shot request timed out after {0:g} s "
+                        "(client-side deadline). " + _CLIENT_TIMEOUT_HINT).format(timeout_s)
                     ) from exc
                 if not _is_connection_error(exc):
                     raise
@@ -775,8 +785,8 @@ class SiteShot:
                     # torn-down connection rather than a timeout), so report a
                     # timeout and never retry it.
                     raise SiteShotTimeoutError(
-                        "Site-Shot request timed out after {0:g} s "
-                        "(client-side deadline).".format(timeout_s)
+                        ("Site-Shot request timed out after {0:g} s "
+                        "(client-side deadline). " + _CLIENT_TIMEOUT_HINT).format(timeout_s)
                     ) from exc
                 if attempt < self.retries:
                     attempt += 1
@@ -820,8 +830,8 @@ class SiteShot:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise SiteShotTimeoutError(
-                    "Site-Shot request timed out after {0:g} s while downloading the "
-                    "response body (client-side deadline).".format(timeout_s),
+                    ("Site-Shot request timed out after {0:g} s while downloading the "
+                    "response body (client-side deadline). " + _CLIENT_TIMEOUT_HINT).format(timeout_s),
                     http_status=status,
                 )
             _tighten_socket_timeout(response, remaining)
@@ -832,8 +842,8 @@ class SiteShot:
                     raise
                 if _is_timeout(exc):
                     raise SiteShotTimeoutError(
-                        "Site-Shot request timed out after {0:g} s while downloading the "
-                        "response body (client-side deadline).".format(timeout_s),
+                        ("Site-Shot request timed out after {0:g} s while downloading the "
+                        "response body (client-side deadline). " + _CLIENT_TIMEOUT_HINT).format(timeout_s),
                         http_status=status,
                     ) from exc
                 if not _is_connection_error(exc):
