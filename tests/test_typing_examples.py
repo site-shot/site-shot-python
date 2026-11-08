@@ -103,6 +103,16 @@ class ReadmeExamplesTypeCheck(unittest.TestCase):
         self.assertEqual(png, PIXELS)
         self.assertIn("width=1280", transport.urls[-1])
 
+    def test_documented_browser_options_are_typed(self) -> None:
+        # webgl, fresh_session and handle_challenges are in the API reference;
+        # a dict carrying them must type check (mypy --strict covers this file).
+        options: CaptureOptions = {"fresh_session": True, "webgl": True, "handle_challenges": False}
+        client, transport = make_client()
+        client.capture("https://example.com/", **options)
+        self.assertIn("fresh_session=1", transport.urls[-1])
+        self.assertIn("webgl=1", transport.urls[-1])
+        self.assertIn("handle_challenges=0", transport.urls[-1])
+
     def test_webp_is_a_typed_format(self) -> None:
         options: CaptureOptions = {"format": "webp"}
         client, transport = make_client()

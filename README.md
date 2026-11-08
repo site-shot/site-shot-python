@@ -137,7 +137,9 @@ Option names mirror the HTTP query parameters **verbatim** (snake_case) — the
 [API reference on the homepage](https://www.site-shot.com/#documentation) and
 this SDK share one vocabulary. Booleans are accepted and coerced to `1`/`0`.
 **Unknown options pass through verbatim**, so future API params work without an
-SDK update.
+SDK update. A name that looks like a typo of a known option (`full_page`,
+`delay`) is still sent, with a `SiteShotWarning` naming the option it most
+likely meant, because the API ignores names it does not know.
 
 | Option | Type / range | API default | Notes |
 |---|---|---|---|
@@ -159,6 +161,9 @@ SDK update.
 | `javascript_code` | str | — | inject JS into the page before capture |
 | `no_ads` | bool | False | remove ads |
 | `no_cookie_popup` | bool | False | remove cookie-consent banners |
+| `webgl` | bool | False | give the page a working (software) WebGL context; detectable by bot protection, so leave it off unless the page needs it |
+| `fresh_session` | bool | False | start in a clean browser: no cookies or local storage saved by an earlier capture, and nothing from this one kept |
+| `handle_challenges` | bool | — | wait through interstitial challenge pages; passing it at all, with either value, turns off Site-Shot's adaptive retries for hard hosts, so leave it out unless you need it |
 | `country` | ISO 3166-1 alpha-2 | — | e.g. `"DE"` — auto-sets language/time zone/geolocation |
 | `strict_country` | bool | False | fail fast instead of silent US fallback |
 | `geolocation` | `"lat,lng"` | — | GPS override, independent of IP |

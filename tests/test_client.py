@@ -48,6 +48,7 @@ from site_shot import (
     SiteShot,
     SiteShotError,
     SiteShotTimeoutError,
+    SiteShotWarning,
     __version__,
 )
 from site_shot.client import _deadline_opener, _tighten_socket_timeout
@@ -248,6 +249,38 @@ class AuthPlacementTests(SiteShotTestCase):
 
 
 class ParamSerializationTests(SiteShotTestCase):
+    def test_a_likely_typo_warns_with_the_option_it_meant(self):
+        # The API ignores names it does not know, so full_page=True silently
+        # gives a viewport capture.
+        cases = (("full_page", "full_size"), ("fullsize", "full_size"), ("delay", "delay_time"))
+        for typo, meant in cases:
+            with self.subTest(typo=typo):
+                client, transport = make_client()
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    client.capture("https://example.com/", **{typo: 1})
+                hints = [w for w in caught if issubclass(w.category, SiteShotWarning)]
+                self.assertEqual(len(hints), 1)
+                self.assertIn('did you mean "{0}"'.format(meant), str(hints[0].message))
+                # Still passed through, as documented.
+                self.assertEqual(transport.last.param(typo), "1")
+
+    def test_known_and_unrelated_options_do_not_warn(self):
+        client, _ = make_client()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            client.capture(
+                "https://example.com/",
+                full_size=True,
+                delay_time=1000,
+                fresh_session=True,
+                webgl=True,
+                handle_challenges=True,
+                request_header="X-A:1",
+                some_future_param="x",
+            )
+            client.build_url("https://example.com/", fresh_session=True)
+
     def test_params_are_verbatim_booleans_coerced_unknowns_passed_through(self):
         client, transport = make_client()
         client.capture(

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import binascii
 import collections.abc
+import difflib
 import http.client
 import io
 import json as _json
@@ -35,6 +36,7 @@ from .errors import (
     QuotaError,
     SiteShotError,
     SiteShotTimeoutError,
+    SiteShotWarning,
 )
 
 __all__ = ["SiteShot", "CaptureOptions", "CaptureResult", "DEFAULT_BASE_URL", "ImageFormat"]
@@ -107,6 +109,11 @@ class CaptureOptions(TypedDict, total=False):
     pass through verbatim, so future API params work without an SDK release
     (a ``TypedDict`` cannot express that, but the methods take ``**params``).
 
+    A name that is not a known option but is close to one (``full_page``,
+    ``delay``) is still sent, with a :class:`SiteShotWarning` naming the option
+    it most likely meant: the API ignores names it does not know, so a typo
+    otherwise goes unnoticed.
+
     ``userkey`` is owned by the :class:`SiteShot` constructor and
     ``response_type`` by the return-mode methods — neither is settable per call.
     """
@@ -159,6 +166,16 @@ class CaptureOptions(TypedDict, total=False):
     no_ads: bool
     #: Remove cookie-consent banners. API default: 0.
     no_cookie_popup: bool
+    #: Give the page a working (software) WebGL context. Detectable by bot
+    #: protection, so leave it off unless the page needs it. API default: 0.
+    webgl: bool
+    #: Start in a clean browser: no cookies or local storage saved by an earlier
+    #: capture, and nothing from this one kept for a later one. API default: 0.
+    fresh_session: bool
+    #: Wait through interstitial challenge pages instead of capturing them.
+    #: Passing it at all, with either value, turns off Site-Shot's adaptive
+    #: retries for hard hosts; leave it out to keep them.
+    handle_challenges: bool
     #: Render from this country - ISO 3166-1 alpha-2 code, e.g. ``"DE"``.
     country: str
     #: Fail with :class:`CountryUnavailableError` instead of a silent US fallback.
@@ -169,6 +186,41 @@ class CaptureOptions(TypedDict, total=False):
     language: str
     #: IANA time-zone name, e.g. ``"Europe/Berlin"``.
     time_zone: str
+
+
+#: Every query parameter the API documents, for typo hints.
+_KNOWN_PARAMS = frozenset(CaptureOptions.__annotations__) | RESERVED_PARAMS | {"request_header"}
+#: Names other screenshot APIs use, which the closeness check would miss.
+_PARAM_ALIASES = {
+    "fullpage": "full_size",
+    "full_page": "full_size",
+    "delay": "delay_time",
+    "wait": "delay_time",
+    "block_ads": "no_ads",
+}
+
+
+def _warn_unknown_param(key: str) -> None:
+    """Warn when an unknown option name looks like a typo of a known one.
+
+    Names with no close match pass through silently, so a new API param works
+    before the SDK knows about it.
+    """
+    if key in _KNOWN_PARAMS:
+        return
+    guess = _PARAM_ALIASES.get(key.lower())
+    if guess is None:
+        matches = difflib.get_close_matches(key.lower(), sorted(_KNOWN_PARAMS), n=1)
+        guess = matches[0] if matches else None
+    if guess is None or guess == key:
+        return
+    warnings.warn(
+        SiteShotWarning(
+            'Unknown capture option "{0}" (did you mean "{1}"?). It is sent as is, '
+            "and the API ignores names it does not know.".format(key, guess)
+        ),
+        stacklevel=4,
+    )
 
 
 #: Parsed JSON result of a capture. Unknown fields are preserved.
@@ -736,6 +788,7 @@ class SiteShot:
         for key, value in options.items():
             if key in RESERVED_PARAMS:
                 continue
+            _warn_unknown_param(key)
             if key == "format":
                 value = _normalize_format(value)
             _append_param(query, key, value)
