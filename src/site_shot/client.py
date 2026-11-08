@@ -420,8 +420,8 @@ def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteSh
     # what the API returns for a missing or unknown ``userkey``.
     if _AUTH_PATTERN.search(lower) or status == 401:
         return AuthError(
-            "Site-Shot rejected the API key{0}. Check the key or get one at "
-            "https://www.site-shot.com/pricing/.".format(": " + error_text if error_text else ""),
+            "Site-Shot rejected the API key{0}. Check the key, or get a free one at "
+            "https://www.site-shot.com/start/.".format(": " + error_text if error_text else ""),
             http_status=status,
             body=body,
         )
@@ -433,9 +433,17 @@ def _classify_error(status: int, error_text: Optional[str], body: Any) -> SiteSh
     # perfectly valid. (The SSRF guard's "Forbidden target address" is also a
     # 403 and lands here too, though it is not billing.)
     if status in (402, 403, 429) or _QUOTA_PATTERN.search(lower):
+        # The API's own "No active subscription found" carries no next step.
+        hint = (
+            " Switch on the free plan at https://www.site-shot.com/start/ or choose a "
+            "plan at https://www.site-shot.com/pricing/."
+            if "no active subscription" in lower
+            else ""
+        )
         return QuotaError(
-            "Site-Shot quota or payment issue{0}.".format(
-                ": " + error_text if error_text else " (HTTP {0})".format(status)
+            "Site-Shot quota or payment issue{0}.{1}".format(
+                ": " + error_text.rstrip(".") if error_text else " (HTTP {0})".format(status),
+                hint,
             ),
             http_status=status,
             body=body,
@@ -504,8 +512,8 @@ class SiteShot:
         if not key or not str(key).strip():
             raise AuthError(
                 "Missing Site-Shot API key. Pass it to SiteShot(api_key) or set the "
-                "SITESHOT_API_KEY environment variable. Get a key at "
-                "https://www.site-shot.com/pricing/."
+                "SITESHOT_API_KEY environment variable. Get a free key at "
+                "https://www.site-shot.com/start/."
             )
         self.api_key = str(key).strip()
         self.base_url = base_url or DEFAULT_BASE_URL

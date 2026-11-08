@@ -157,11 +157,21 @@ class ConstructorTests(SiteShotTestCase):
         with self.assertRaises(AuthError):
             SiteShot("   ")
 
-    def test_auth_error_message_points_at_pricing(self):
+    def test_auth_error_message_points_at_the_quickstart(self):
+        # /start/ is where a key is issued (with the free plan); /pricing/ is
+        # for buying a plan.
         with self.assertRaises(AuthError) as ctx:
             SiteShot()
         self.assertIn("SITESHOT_API_KEY", str(ctx.exception))
-        self.assertIn("https://www.site-shot.com/pricing/", str(ctx.exception))
+        self.assertIn("https://www.site-shot.com/start/", str(ctx.exception))
+        self.assertNotIn("/pricing/", str(ctx.exception))
+
+    def test_rejected_key_message_points_at_the_quickstart(self):
+        client, _ = make_client(json_response({"message": "Invalid authentication credentials"}, 401))
+        with self.assertRaises(AuthError) as ctx:
+            client.capture("https://example.com/")
+        self.assertIn("https://www.site-shot.com/start/", str(ctx.exception))
+        self.assertNotIn("/pricing/", str(ctx.exception))
 
     def test_falls_back_to_env_var(self):
         os.environ["SITESHOT_API_KEY"] = "env-key"
@@ -593,6 +603,14 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         self.assertEqual(error.http_status, 403)
         self.assertEqual(error.body, body)
         self.assertIn("No active subscription found", str(error))
+
+    def test_no_active_subscription_names_the_next_step(self):
+        # The API's bare sentence says what is wrong but not what to do.
+        client, _ = make_client(json_response({"message": "No active subscription found"}, 403))
+        with self.assertRaises(QuotaError) as ctx:
+            client.capture("https://example.com/")
+        self.assertIn("https://www.site-shot.com/start/", str(ctx.exception))
+        self.assertIn("free plan", str(ctx.exception))
 
     def test_free_plan_refusals_raise_quota_error_not_auth_error(self):
         # The month's free-plan captures spent, under either wording, or a

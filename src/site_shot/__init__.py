@@ -10,7 +10,7 @@
     png = client.capture("example.com", full_size=True)
 
 Zero dependencies (standard library only), sync, fully typed.
-Docs: https://www.site-shot.com/ — API keys: https://www.site-shot.com/pricing/
+Docs: https://www.site-shot.com/ — API keys: https://www.site-shot.com/start/
 """
 
 from .client import (

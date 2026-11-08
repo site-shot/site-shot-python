@@ -48,7 +48,8 @@ examples = ["Pillow"]
 [project.urls]
 Homepage = "https://www.site-shot.com/"
 Documentation = "https://www.site-shot.com/#documentation"
-"API keys & pricing" = "https://www.site-shot.com/pricing/"
+"Get an API key" = "https://www.site-shot.com/start/"
+Pricing = "https://www.site-shot.com/pricing/"
 "For AI agents" = "https://www.site-shot.com/ai-agents/"
 Repository = "https://github.com/site-shot/site-shot-python"
 Issues = "https://github.com/site-shot/site-shot-python/issues"
