@@ -753,13 +753,25 @@ class SiteShot:
         """Capture and return the full JSON result.
 
         Contains the base64 ``image`` plus any metadata the API includes —
-        and ``source_code`` (the rendered HTML) when you ask for it.
+        and ``source_code`` (the rendered HTML) when you ask for it. When it
+        was asked for and the API left it out (it does so when the render ran
+        out of time), :class:`SiteShotTimeoutError` is raised, so
+        ``result["source_code"]`` is always there when requested.
         """
         query = self._build_params(url, params)
         query.append(("response_type", "json"))
         endpoint = self._endpoint(query)
         timeout_s = self._resolve_timeout(params)
-        return self._request(endpoint, timeout_s)
+        result = self._request(endpoint, timeout_s)
+        requested = params.get("source_code")
+        if requested is not None and _is_set(str(requested)) and "source_code" not in result:
+            raise SiteShotTimeoutError(
+                "Site-Shot returned no source_code although it was requested; the render "
+                "most likely ran out of time. The capture may still count toward your "
+                "allowance.",
+                body=result,
+            )
+        return result
 
     def build_url(self, url: str, /, **params: Any) -> str:
         """Build the request URL without executing it.

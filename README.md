@@ -70,7 +70,7 @@ b64 = client.capture_base64("https://example.com/")
 
 # 4. Full JSON result (image plus metadata; add source_code for rendered HTML)
 meta = client.capture_json("https://example.com/", source_code=True)
-print(meta["source_code"][:200])
+print(meta["source_code"][:200])  # present whenever requested; the SDK raises otherwise
 ```
 
 `url` is positional-only, every capture option is a keyword argument. An options

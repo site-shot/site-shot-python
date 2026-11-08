@@ -975,6 +975,21 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         meta = client.capture_json("https://example.com/", source_code=True)
         self.assertEqual(meta["source_code"], "<html></html>")
 
+    def test_requested_source_code_missing_from_the_result_raises(self):
+        # derived (api Request.pm _build_legacy_payload): source_code is only
+        # attached when defined, and a render that ran out of time leaves it
+        # out on an otherwise successful HTTP 200.
+        for requested in (True, 1, "1"):
+            client, _ = make_client(json_response({"image": PIXELS_B64}))
+            with self.assertRaises(SiteShotTimeoutError) as ctx:
+                client.capture_json("https://example.com/", source_code=requested)
+            self.assertIn("source_code", str(ctx.exception))
+
+    def test_source_code_not_requested_is_not_required(self):
+        for options in ({}, {"source_code": False}, {"source_code": 0}, {"source_code": None}):
+            client, _ = make_client(json_response({"image": PIXELS_B64}))
+            self.assertEqual(client.capture_json("https://example.com/", **options)["image"], PIXELS_B64)
+
     def test_malformed_base64_raises_api_error_instead_of_corrupt_bytes(self):
         for image in ("@@@@ not base64 @@@@", "%%%%", "AAAAA"):
             client, _ = make_client(json_response({"image": image}))
