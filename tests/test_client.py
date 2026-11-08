@@ -992,6 +992,33 @@ class ErrorTaxonomyTests(SiteShotTestCase):
         self.assertEqual(ctx.exception.http_status, 500)
         self.assertIn("upstream exploded", str(ctx.exception.body))
 
+    def test_gateway_html_pages_give_a_short_message_and_keep_the_body(self):
+        # derived: the nginx pages the edge serves during the nightly API
+        # restarts.
+        for status, title in ((502, "502 Bad Gateway"), (504, "504 Gateway Time-out")):
+            page = (
+                "<html>\r\n<head><title>{0}</title></head>\r\n<body>\r\n<center><h1>{0}"
+                "</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+            ).format(title)
+            with self.subTest(status=status):
+                client, _ = make_client(FakeResponse(page, status))
+                with self.assertRaises(APIError) as ctx:
+                    client.capture("https://example.com/")
+                error = ctx.exception
+                self.assertNotIsInstance(error, SiteShotTimeoutError)
+                self.assertEqual(error.http_status, status)
+                self.assertNotIn("<", str(error))
+                self.assertIn("HTTP {0}".format(status), str(error))
+                self.assertIn("try again", str(error))
+                self.assertEqual(error.body, page)
+
+    def test_plain_text_rejections_keep_their_text(self):
+        # The free plan's used-up 403 is plain text: it must still be quoted.
+        client, _ = make_client(FakeResponse(FREE_PLAN_REFUSALS[0], 403))
+        with self.assertRaises(QuotaError) as ctx:
+            client.capture("https://example.com/")
+        self.assertIn("Free plan used up", str(ctx.exception))
+
     def test_http_200_with_a_non_json_body_raises_api_error(self):
         client, _ = make_client(FakeResponse("<html>error page</html>", 200))
         with self.assertRaises(APIError):

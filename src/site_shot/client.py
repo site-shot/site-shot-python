@@ -979,6 +979,20 @@ class SiteShot:
             return envelope
 
         if not ok:
+            if text.lstrip().startswith("<"):
+                # An HTML error page from the edge (nginx 502/504 while the API
+                # restarts): useless as a message, and its "504 Gateway
+                # Time-out" is the gateway's, not a render timeout. The page
+                # stays in ``body``.
+                if status >= 500:
+                    reason = http.client.responses.get(status, "")
+                    raise APIError(
+                        "Site-Shot API returned HTTP {0}{1} from its gateway; try again "
+                        "shortly.".format(status, " " + reason if reason else ""),
+                        http_status=status,
+                        body=text,
+                    )
+                raise _classify_error(status, None, text)
             raise _classify_error(status, text[:500] if text else None, text)
 
         raise APIError(
