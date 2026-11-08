@@ -143,7 +143,7 @@ likely meant, because the API ignores names it does not know.
 
 | Option | Type / range | API default | Notes |
 |---|---|---|---|
-| `url` | str, **required** (positional-only) | — | bare domains like `example.com` accepted (`https://` assumed) |
+| `url` | str, **required** (positional-only) | — | bare domains like `example.com` accepted (`https://` assumed); other schemes (`ftp:`, `file:`, ...) raise `InvalidParamsError` before a request |
 | `width` | int 100–8000 | 1024 | viewport width |
 | `height` | int 100–20000 | 768 | viewport height |
 | `zoom` | int 5–1000 | 100 | percentage zoom |

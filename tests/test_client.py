@@ -480,6 +480,38 @@ class ReturnModeTests(SiteShotTestCase):
 
 
 class BuildUrlTests(SiteShotTestCase):
+    def test_non_web_schemes_are_refused_before_a_request(self):
+        # Before, these were mangled into https://ftp://... and sent (live:
+        # "Malformed target address").
+        for bad in (
+            "ftp://example.com/x",
+            "FILE:///etc/hosts",
+            "javascript:alert(1)",
+            "mailto:someone@example.com",
+            "data:text/html,hi",
+            "ws://example.com/",
+        ):
+            with self.subTest(url=bad):
+                client, transport = make_client()
+                with self.assertRaises(InvalidParamsError) as ctx:
+                    client.capture(bad)
+                self.assertIn("only http(s)", str(ctx.exception))
+                with self.assertRaises(InvalidParamsError):
+                    client.build_url(bad)
+                self.assertEqual(transport.calls, [])
+
+    def test_hosts_with_a_port_are_still_bare_domains(self):
+        client, _ = make_client()
+        for given, sent in (
+            ("example.com:8080/x", "https://example.com:8080/x"),
+            ("HTTP://example.com/", "HTTP://example.com/"),
+            ("https://example.com/", "https://example.com/"),
+        ):
+            url = client.build_url(given)
+            self.assertEqual(
+                urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["url"], [sent]
+            )
+
     def test_build_url_embeds_the_key_and_never_executes(self):
         client, transport = make_client()
         url = client.build_url("example.com", width=1280, no_ads=True)

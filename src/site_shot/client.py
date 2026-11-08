@@ -413,10 +413,27 @@ def _tighten_socket_timeout(response: Any, remaining: float) -> None:
         pass
 
 
+#: An explicit scheme: ``name://`` or one of the non-web schemes written without
+#: slashes. ``example.com:8080`` and ``localhost:3000`` are hosts with a port,
+#: not schemes, and stay accepted as bare domains.
+_SCHEME_PATTERN = re.compile(
+    r"^([a-z][a-z0-9+.-]*)://"
+    r"|^(javascript|mailto|data|file|about|blob|tel|view-source|chrome):",
+    re.IGNORECASE,
+)
+
+
 def _normalize_url(raw: Any) -> str:
     trimmed = ("" if raw is None else str(raw)).strip()
     if not trimmed:
         raise InvalidParamsError('Missing required "url" option.')
+    scheme = _SCHEME_PATTERN.match(trimmed)
+    if scheme and (scheme.group(1) or scheme.group(2)).lower() not in ("http", "https"):
+        raise InvalidParamsError(
+            'Unsupported URL scheme in "{0}": only http(s) web pages can be captured.'.format(
+                trimmed
+            )
+        )
     candidate = trimmed if re.match(r"^https?://", trimmed, re.IGNORECASE) else "https://" + trimmed
     parts = urllib.parse.urlsplit(candidate)
     if not parts.netloc or any(ch.isspace() for ch in parts.netloc):
