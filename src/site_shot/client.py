@@ -36,7 +36,7 @@ from .errors import (
 __all__ = ["SiteShot", "CaptureOptions", "CaptureResult", "DEFAULT_BASE_URL", "ImageFormat"]
 
 DEFAULT_BASE_URL = "https://api.site-shot.com/"
-SDK_VERSION = "0.3.1"
+SDK_VERSION = "0.3.2"
 
 #: The API's own default server-side render deadline (the ``timeout`` param), ms.
 DEFAULT_SERVER_TIMEOUT_MS = 60_000

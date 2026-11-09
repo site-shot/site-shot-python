@@ -1,6 +1,6 @@
 # site-shot
 
-Official Python SDK for the [Site-Shot](https://www.site-shot.com/) screenshot API.
+Official Python SDK for the [Site-Shot](https://www.site-shot.com/) website screenshot API.
 
 ```bash
 pip install site-shot

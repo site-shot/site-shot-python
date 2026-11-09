@@ -4,14 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "site-shot"
-version = "0.3.1"
-description = "Official Python SDK for the Site-Shot screenshot API — capture website screenshots in a real Chromium browser (full-page, country proxies, ad & cookie-banner removal). Zero dependencies."
+version = "0.3.2"
+description = "Website screenshot API for Python: the official Site-Shot SDK. Capture full-page website screenshots in a real Chromium browser, with ad & cookie-banner removal and country proxies (paid plans). Free plan: 100 API captures a month, no card needed. Zero dependencies."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Site-Shot", email = "support@site-shot.com" }]
 maintainers = [{ name = "Site-Shot", email = "support@site-shot.com" }]
 keywords = [
+    "website screenshot",
+    "screenshot api",
+    "website screenshot api",
+    "python screenshot",
+    "full page screenshot",
+    "url to image",
     "screenshot",
     "screenshot-api",
     "website-screenshot",
@@ -48,7 +54,8 @@ examples = ["Pillow"]
 [project.urls]
 Homepage = "https://www.site-shot.com/"
 Documentation = "https://www.site-shot.com/#documentation"
-"API keys & pricing" = "https://www.site-shot.com/pricing/"
+"Get an API key" = "https://www.site-shot.com/start/"
+Pricing = "https://www.site-shot.com/pricing/"
 "For AI agents" = "https://www.site-shot.com/ai-agents/"
 Repository = "https://github.com/site-shot/site-shot-python"
 Issues = "https://github.com/site-shot/site-shot-python/issues"
