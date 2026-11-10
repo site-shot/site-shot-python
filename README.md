@@ -36,7 +36,10 @@ The import package is `site_shot`; the pip name is `site-shot` (PyPI treats the
 two spellings as the same project).
 
 Building an AI agent with an MCP-capable client instead? Use the sibling MCP
-server: `npx -y site-shot-mcp`. Working in Node? `npm install site-shot-sdk`.
+server: `npx -y site-shot-mcp`. Using LangChain 1.x on Python 3.10+?
+`pip install langchain-siteshot` provides `SiteShotScreenshot`, a LangChain tool
+that returns the screenshot to a multimodal model as image content. Working in
+Node? `npm install site-shot-sdk`.
 
 ## CSV → local report example
 
@@ -75,6 +78,31 @@ print(meta["source_code"][:200])
 
 `url` is positional-only, every capture option is a keyword argument. An options
 dict works too: `client.capture(url, **options)`.
+
+### The page as Markdown, in the same reply
+
+```python
+meta = client.capture_json("https://example.com/", markdown=True)
+if meta["markdown_status"] == "ok":
+    text = meta["markdown"]
+else:
+    print("no Markdown:", meta["markdown_status_detail"])
+```
+
+`markdown=True` adds the rendered page as Markdown to the JSON result, converted
+from the same capture attempt as the image. It is not a separate
+article-extraction or AI-summary service. `meta["markdown"]` is present only when
+`meta["markdown_status"]` is `"ok"`; for `"empty"`, `"too_large"`, `"timeout"`,
+`"disabled"` or `"error"`, `meta["markdown_status_detail"]` says why. Do not read
+a missing `markdown` field as empty text. Output is capped at 40,000 Unicode code
+points: check `meta["truncated"]` before using the text.
+
+Only `capture_json` returns the Markdown. `capture`, `capture_base64` and
+`capture_to_file` still request it but return only the image, so leave it off
+there. `build_url()` cannot carry it: its URL is in image mode, where the API
+refuses `markdown=1` with HTTP 400. If the API cannot deliver the reply with the
+Markdown, it answers HTTP 500, which the SDK raises as `APIError`, with no
+screenshot. The option passes through like any other, so it needs no SDK update.
 
 ### `build_url()` — build the request URL without executing it
 
@@ -164,6 +192,10 @@ SDK update.
 | `geolocation` | `"lat,lng"` | — | GPS override, independent of IP |
 | `language` | str | from `country` / en | Accept-Language |
 | `time_zone` | IANA name | America/New_York | see <https://www.site-shot.com/time-zones/> |
+
+`markdown` (bool, use with `capture_json`) is not in `CaptureOptions`, so a typed
+options dict that contains it fails `mypy`; pass it as a keyword instead:
+`client.capture_json(url, **options, markdown=True)`.
 
 `userkey` (your API key) is owned by the `SiteShot` constructor — never a
 per-call option. `response_type` is owned by the return-mode methods.
@@ -264,6 +296,9 @@ usually better engineering: the same pipeline on every request, country-specific
 cent per capture instead of a browser session plus vision tokens per look. The full comparison:
 [AI agent vs. screenshot API — who should capture the page](https://www.site-shot.com/blog/ai-agent-vs-screenshot-api/).
 
+If the agent needs the page's text, `capture_json(url, markdown=True)` also returns the rendered
+page as Markdown when `markdown_status` is `"ok"` (see above).
+
 ## Requirements
 
 - Python >= 3.9
@@ -278,6 +313,7 @@ cent per capture instead of a browser session plus vision tokens per look. The f
 - Time zones: <https://www.site-shot.com/time-zones/>
 - Node.js SDK: `npm install site-shot-sdk`
 - MCP server (agent tooling sibling): `npx -y site-shot-mcp`
+- LangChain tool (Python >= 3.10, LangChain 1.x): `pip install langchain-siteshot` (<https://pypi.org/project/langchain-siteshot/>)
 - When an agent should delegate the capture: <https://www.site-shot.com/blog/ai-agent-vs-screenshot-api/>
 
 ## License

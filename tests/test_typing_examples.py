@@ -14,6 +14,7 @@ annotations. A documented call that stops type checking now fails CI.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -94,6 +95,60 @@ class ReadmeExamplesTypeCheck(unittest.TestCase):
             )
             with open(path, "rb") as handle:
                 self.assertEqual(handle.read(), PIXELS)
+
+    def test_markdown_snippet_reads_the_status_before_the_text(self) -> None:
+        # The README's snippet: the option passes through as `markdown=1`, and
+        # the text is read only when `markdown_status` says it is there.
+        transport = StubTransport(
+            {
+                "image": PIXELS_B64,
+                "markdown_status": "ok",
+                "markdown": "# Example Domain",
+                "markdown_chars": 16,
+                "truncated": False,
+            }
+        )
+        client = SiteShot("test-key", transport=transport)
+        meta: CaptureResult = client.capture_json("https://example.com/", markdown=True)
+        if meta["markdown_status"] == "ok":
+            text: str = meta["markdown"]
+        else:
+            self.fail("an ok reply took the no-Markdown branch")
+        self.assertEqual(text, "# Example Domain")
+        self.assertIn("markdown=1", transport.urls[-1])
+        self.assertIn("response_type=json", transport.urls[-1])
+
+    def test_markdown_snippet_survives_a_reply_without_markdown(self) -> None:
+        # Every non-ok status omits the field, so reading it unconditionally
+        # would raise KeyError; the README's else branch reports the detail.
+        transport = StubTransport(
+            {
+                "image": PIXELS_B64,
+                "markdown_status": "empty",
+                "markdown_status_detail": "no_readable_text",
+                "markdown_chars": 0,
+                "truncated": False,
+            }
+        )
+        client = SiteShot("test-key", transport=transport)
+        meta: CaptureResult = client.capture_json("https://example.com/", markdown=True)
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            if meta["markdown_status"] == "ok":
+                self.fail("a reply without Markdown took the ok branch")
+            else:
+                print("no Markdown:", meta["markdown_status_detail"])
+        self.assertEqual(printed.getvalue(), "no Markdown: no_readable_text\n")
+        self.assertNotIn("markdown", meta)
+
+    def test_markdown_goes_beside_a_typed_options_dict(self) -> None:
+        # `markdown` is not a `CaptureOptions` key, so the README passes it as a
+        # keyword next to the splatted dict; this line must type check.
+        options: CaptureOptions = {"width": 1280}
+        client, transport = make_client()
+        client.capture_json("https://example.com/", **options, markdown=True)
+        self.assertIn("markdown=1", transport.urls[-1])
+        self.assertIn("width=1280", transport.urls[-1])
 
     def test_capture_options_dict_splats_onto_every_method(self) -> None:
         # The README's snippet, verbatim.
